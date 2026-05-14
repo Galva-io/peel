@@ -3,31 +3,44 @@ import PeelCore
 import PeelAPI
 import PeelPersistence
 
-/// Two-level sidebar: each app is a collapsible header; each endpoint under
-/// it is a selectable row. Only one app's endpoint is focused at a time —
-/// clicking an endpoint anywhere makes its parent app the active one.
+/// Project-Navigator-style sidebar. The patterns borrowed from Xcode are:
 ///
-/// We intentionally drop the "Recent history" section here. History is
-/// reachable via the View menu and the Compare panel, but the sidebar's job
-/// is navigation, not memory.
+///   • A vibrant source-list (`.listStyle(.sidebar)`) so the pane picks up
+///     the window's translucency in both light and dark appearances.
+///   • Tight 11-pt typography for endpoint rows, 12-pt for the app row
+///     that frames them. The weight differential is what distinguishes
+///     "container" from "leaf" — no boxes, no badges.
+///   • A bottom filter strip that fades into the sidebar material with a
+///     filter glyph that lights up when filtering is active.
+///   • `controlSize(.small)` everywhere so disclosure triangles, row
+///     heights, and chevrons match navigator density.
+///
+/// Every color used here comes from the system semantic palette, so the
+/// pane reads identically in either appearance — no per-mode overrides
+/// needed.
 public struct SidebarView: View {
     @Bindable public var store: PeelAppStore
     @State private var showingAddApp = false
     @State private var appPendingDelete: AppConfig?
+    @State private var filterText: String = ""
 
     public init(store: PeelAppStore) { self.store = store }
 
     public var body: some View {
-        List(selection: selectionBinding) {
-            ForEach(store.apps) { app in
-                appSection(app)
+        VStack(spacing: 0) {
+            List(selection: selectionBinding) {
+                ForEach(visibleApps) { app in
+                    appSection(app)
+                }
             }
+            .listStyle(.sidebar)
+            .controlSize(.small)
+            .scrollContentBackground(.hidden)
+
+            filterBar
         }
-        .listStyle(.sidebar)
-        .frame(minWidth: 240)
-        .safeAreaInset(edge: .bottom) {
-            sidebarFooter
-        }
+        .frame(minWidth: 220)
+        .background(.regularMaterial)
         .sheet(isPresented: $showingAddApp) {
             AddAppSheet(store: store, isPresented: $showingAddApp)
         }
@@ -61,20 +74,46 @@ public struct SidebarView: View {
         )
     }
 
+    // MARK: - Filter
+
+    private var visibleApps: [AppConfig] {
+        let needle = filterText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return store.apps }
+        return store.apps.filter { app in
+            if app.displayName.lowercased().contains(needle) { return true }
+            if app.bundleId.lowercased().contains(needle) { return true }
+            return EndpointID.allCases.contains { $0.displayName.lowercased().contains(needle) }
+        }
+    }
+
+    private func matchesFilter(_ endpoint: EndpointID, in app: AppConfig) -> Bool {
+        let needle = filterText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return true }
+        if app.displayName.lowercased().contains(needle) || app.bundleId.lowercased().contains(needle) {
+            return true
+        }
+        return endpoint.displayName.lowercased().contains(needle)
+    }
+
+    // MARK: - Rows
+
     @ViewBuilder
     private func appSection(_ app: AppConfig) -> some View {
-        let isExpanded = store.expandedAppIds.contains(app.id)
+        let needle = filterText.trimmingCharacters(in: .whitespaces).lowercased()
+        let userExpanded = store.expandedAppIds.contains(app.id)
+        let forceExpanded = !needle.isEmpty
+        let isExpanded = forceExpanded || userExpanded
         let isActiveApp = store.activeAppId == app.id
 
         DisclosureGroup(
             isExpanded: Binding(
                 get: { isExpanded },
-                set: { _ in store.toggleExpansion(for: app.id) }
+                set: { _ in
+                    if !forceExpanded { store.toggleExpansion(for: app.id) }
+                }
             )
         ) {
-            // Flat endpoint list — categories used to nest these but the
-            // colored method badge already communicates the read/write split.
-            ForEach(EndpointID.allCases, id: \.self) { endpoint in
+            ForEach(EndpointID.allCases.filter { matchesFilter($0, in: app) }, id: \.self) { endpoint in
                 EndpointRow(endpoint: endpoint)
                     .tag(SidebarSelection(appId: app.id, endpoint: endpoint))
             }
@@ -100,110 +139,118 @@ public struct SidebarView: View {
         }
     }
 
-    private var sidebarFooter: some View {
-        HStack {
+    // MARK: - Filter bar
+
+    /// Sits at the foot of every Xcode navigator. Same idiom here:
+    ///
+    ///     ⌕ Filter [×]                 │ +
+    ///
+    /// The filter glyph fills with the system accent color when a filter
+    /// is active — a single-pixel state change that's easy to miss but
+    /// matters for "is my list filtered right now?"
+    private var filterBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: filterText.isEmpty
+                  ? "line.3.horizontal.decrease.circle"
+                  : "line.3.horizontal.decrease.circle.fill")
+                .imageScale(.small)
+                .foregroundStyle(filterText.isEmpty ? AnyShapeStyle(HierarchicalShapeStyle.secondary) : AnyShapeStyle(Color.accentColor))
+
+            TextField("Filter", text: $filterText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .frame(minHeight: 16)
+
+            if !filterText.isEmpty {
+                Button { filterText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            Divider()
+                .frame(height: 12)
+
             Button {
                 showingAddApp = true
             } label: {
-                Label("Add App", systemImage: "plus.circle")
-                    .labelStyle(.titleAndIcon)
+                Image(systemName: "plus")
+                    .imageScale(.small)
+                    .frame(width: 16, height: 16)
             }
-            .buttonStyle(.plain)
-            .controlSize(.small)
-            .help("Add a new App Store Connect app context")
-
-            Spacer()
-
-            if let last = store.lastAction {
-                Text(last, format: .relative(presentation: .numeric, unitsStyle: .narrow))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .help("Last API call")
-            }
+            .buttonStyle(.borderless)
+            .help("Add an app context (⌘⇧N)")
+            .keyboardShortcut("n", modifiers: [.command, .shift])
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .background(.bar)
+        .overlay(alignment: .top) {
+            Rectangle().fill(.separator).frame(height: 0.5)
+        }
     }
 }
 
+/// App "container" row. Slightly heavier than endpoint rows — 12-pt body
+/// weight when active, regular when idle — so the eye reads the app as the
+/// parent and endpoints as its children even without explicit nesting
+/// lines.
 struct AppRow: View {
     let app: AppConfig
     let isActive: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            AppIconView(app: app, size: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(app.displayName)
-                        .font(.callout.weight(isActive ? .semibold : .regular))
-                        .foregroundStyle(isActive ? Color.primary : Color.primary.opacity(0.85))
-                    if app.isPinned {
-                        Image(systemName: "pin.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                Text(app.bundleId)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        HStack(spacing: 6) {
+            AppIconView(app: app, size: 16)
+            Text(app.displayName)
+                .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                .lineLimit(1)
+            if app.isPinned {
+                Image(systemName: "pin.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 1)
         .accessibilityLabel("App \(app.displayName), bundle \(app.bundleId)")
     }
 }
 
+/// Endpoint "leaf" row. 11-pt body, tertiary-tinted glyph, no chrome —
+/// typography carries the row. Destructive endpoints (PUT or mutating
+/// POST) tint their glyph with the warning color so the eye catches them.
 struct EndpointRow: View {
     let endpoint: EndpointID
 
     var body: some View {
-        HStack(spacing: 8) {
-            MethodBadge(method: endpoint.httpMethod, isDestructive: endpoint.isMutating)
+        HStack(spacing: 6) {
+            Image(systemName: glyph)
+                .imageScale(.small)
+                .frame(width: 12)
+                .foregroundStyle(endpoint.isMutating ? AnyShapeStyle(PeelTheme.productionTint) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                .accessibilityHidden(true)
             Text(endpoint.displayName)
-                .font(.callout)
+                .font(.system(size: 11))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 1)
-    }
-}
-
-/// HTTP-method chip: `GET` is green, non-mutating `POST` is blue, anything
-/// destructive — `PUT` or a mutating `POST` — is the warning color. Same
-/// color/text vocabulary as Postman, so devs translate at a glance.
-struct MethodBadge: View {
-    let method: EndpointID.HTTPMethod
-    let isDestructive: Bool
-
-    var body: some View {
-        Text(method.label)
-            .font(.system(size: 9, weight: .bold, design: .rounded))
-            .tracking(0.4)
-            .foregroundStyle(.white)
-            .frame(width: 38, height: 16)
-            .background(background, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .accessibilityLabel("\(method.label)\(isDestructive ? " · destructive" : "")")
+        .accessibilityLabel("\(endpoint.displayName)\(endpoint.isMutating ? ", destructive" : "")")
     }
 
-    private var background: Color {
-        if isDestructive { return PeelTheme.productionTint }
-        switch method {
-        case .get: return Color(red: 0.22, green: 0.65, blue: 0.36)   // green
-        case .post: return Color(red: 0.30, green: 0.55, blue: 0.95)  // blue
-        case .put: return PeelTheme.productionTint                    // warning fallback
+    private var glyph: String {
+        switch endpoint.httpMethod {
+        case .get: return "arrow.down.circle"
+        case .post: return "paperplane"
+        case .put: return "pencil"
         }
     }
 }
 
-/// Renders the cached App Store artwork if present, otherwise a colored
-/// initial. Same component used in the sidebar, toolbar (vestigial), and
-/// add-app sheet so everything stays visually consistent.
+/// Renders cached App Store artwork when available, otherwise a colored
+/// initial. Shared by the sidebar, the add-app preview, and the inspector.
 public struct AppIconView: View {
     public let app: AppConfig
     public let size: CGFloat
@@ -227,7 +274,7 @@ public struct AppIconView: View {
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
     }
 
@@ -250,7 +297,6 @@ extension Notification.Name {
     public static let peelOpenSettings = Notification.Name("io.galva.peel.openSettings")
     public static let peelFocusSearch = Notification.Name("io.galva.peel.focusSearch")
     public static let peelMarkCompare = Notification.Name("io.galva.peel.markCompare")
-    public static let peelToggleSidebar = Notification.Name("io.galva.peel.toggleSidebar")
     public static let peelToggleEnv = Notification.Name("io.galva.peel.toggleEnv")
     public static let peelToggleReadOnly = Notification.Name("io.galva.peel.toggleReadOnly")
     public static let peelSendRequest = Notification.Name("io.galva.peel.sendRequest")

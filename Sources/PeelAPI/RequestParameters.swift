@@ -100,11 +100,18 @@ public enum EndpointCatalog {
             return []
         case .getNotificationHistory:
             return [
-                ParameterField(id: "startDate", label: "Start date (epoch ms)", kind: .dateMillis, isRequired: true),
-                ParameterField(id: "endDate", label: "End date (epoch ms)", kind: .dateMillis, isRequired: true),
-                ParameterField(id: "notificationType", label: "Notification type", kind: .text, isRequired: false),
-                ParameterField(id: "transactionId", label: "Transaction ID", kind: .transactionId, isRequired: false),
-                ParameterField(id: "paginationToken", label: "Pagination token", kind: .text, isRequired: false)
+                ParameterField(id: "startDate", label: "Start date", kind: .dateMillis, isRequired: true,
+                               help: "Inclusive lower bound of the time window."),
+                ParameterField(id: "endDate", label: "End date", kind: .dateMillis, isRequired: true,
+                               help: "Inclusive upper bound."),
+                ParameterField(id: "notificationType", label: "Notification type",
+                               kind: .enumeration(options: AppleNotificationType.all), isRequired: false,
+                               help: "Leave empty to match every type."),
+                ParameterField(id: "transactionId", label: "Transaction ID", kind: .transactionId, isRequired: false,
+                               help: "Optional filter. Suggestions are pulled from your prior requests."),
+                ParameterField(id: "itemLimit", label: "How many to fetch", kind: .integer, isRequired: false,
+                               placeholder: "20",
+                               help: "Peel paginates automatically until it hits this count or runs out of results.")
             ]
         case .getTestNotificationStatus:
             return [

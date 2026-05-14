@@ -1,27 +1,34 @@
 import SwiftUI
 import AppKit
 
-/// Centralized design tokens. Production-tinted chrome is everywhere; this is
-/// where we keep the canonical color so nothing drifts.
+/// Peel's color budget is deliberately tiny. Two roles:
+///
+///   • The system accent color (driven by the user's macOS preference, or
+///     the AppIcon's AccentColor entry). Used for primary buttons, selected
+///     rows, focused controls — everything an Apple-native app uses
+///     `.tint` for.
+///
+///   • A single semantic warning red. Used **only** for Production chrome,
+///     destructive confirmations, and write endpoints (which are themselves
+///     destructive against live data). The point of restraint is that when
+///     red appears, it means "be careful" — not "this is a tag."
+///
+/// Anything else (greens for sandbox, blues for POST, purples for JWS) was
+/// noise and is gone.
 public enum PeelTheme {
-    public static let productionTint = Color(red: 0.83, green: 0.18, blue: 0.18)
-    public static let sandboxTint = Color(red: 0.18, green: 0.55, blue: 0.30)
+    /// Reserved for Production environment chrome and destructive UI only.
+    /// Matches system red so it harmonizes with macOS alert dialogs.
+    public static let warning = Color(nsColor: .systemRed)
 
-    public static func tint(for environment: PeelEnvironmentDescriptor) -> Color {
-        switch environment {
-        case .production: return productionTint
-        case .sandbox: return sandboxTint
-        }
-    }
-}
-
-public enum PeelEnvironmentDescriptor: Sendable, Hashable {
-    case sandbox
-    case production
+    /// Convenience alias — kept for naming clarity in places that read
+    /// "production tint" semantically rather than "warning."
+    public static var productionTint: Color { warning }
 }
 
 extension Color {
-    /// Parses `#RRGGBB` strings stored in `AppConfig.accentColorHex`.
+    /// Parses `#RRGGBB` strings stored in `AppConfig.accentColorHex`. The
+    /// per-app accent is no longer user-editable, but we still surface the
+    /// stored value as a fallback for icon placeholders.
     public init?(hex: String) {
         var value = hex
         if value.hasPrefix("#") { value.removeFirst() }

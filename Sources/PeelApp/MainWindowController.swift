@@ -13,15 +13,17 @@ final class PeelMainWindowController: NSWindowController, NSWindowDelegate {
 
     init(store: PeelAppStore) {
         self.store = store
+        // No `.fullSizeContentView` / `toolbarStyle` — we no longer use an
+        // `NSToolbar`. The window is just title bar + content, and the
+        // SwiftUI `TopBarView` paints its own opaque strip below the title.
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Peel"
         window.titlebarAppearsTransparent = false
-        window.toolbarStyle = .unified
         window.tabbingMode = .preferred
         window.minSize = NSSize(width: 880, height: 560)
         window.setFrameAutosaveName("PeelMainWindow")

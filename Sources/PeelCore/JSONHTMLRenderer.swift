@@ -140,6 +140,11 @@ public struct JSONHTMLRenderer: Sendable {
 
     // MARK: - HTML shell
 
+    /// The page mimics macOS native styling: system monospaced font, system
+    /// label colors via `-apple-system` CSS keywords, and a find bar that's
+    /// hidden until ⌘F summons it (matching `NSTextFinder`'s incremental
+    /// reveal behavior). No decorative purple — the JWS envelope is signaled
+    /// by a thin leading border, same restraint Xcode's source list uses.
     static let shell: String = #"""
     <!doctype html>
     <html>
@@ -149,64 +154,59 @@ public struct JSONHTMLRenderer: Sendable {
     <style>
       :root {
         color-scheme: light dark;
-        --bg: #ffffff;
-        --fg: #1c1c1e;
-        --muted: #8a8a8e;
-        --key: #5a5a60;
+        --bg: transparent;
+        --fg: -apple-system-label;
+        --muted: -apple-system-secondary-label;
+        --tertiary: -apple-system-tertiary-label;
         --string: #1f7a3a;
         --number: #1652cf;
         --bool: #b1530f;
-        --null: #8a8a8e;
-        --hint: #a0a0a8;
-        --jws: #7438cf;
-        --highlight: rgba(255, 214, 10, 0.35);
+        --separator: rgba(120, 120, 128, 0.22);
         --row-hover: rgba(120, 120, 128, 0.08);
+        --highlight: color-mix(in srgb, -apple-system-yellow 35%, transparent);
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: transparent;
-          --fg: #ececec;
-          --muted: #8e8e93;
-          --key: #d1d1d6;
           --string: #6acb6a;
           --number: #6ea8fe;
           --bool: #ffa552;
-          --null: #8e8e93;
-          --hint: #8e8e93;
-          --jws: #c39bff;
-          --highlight: rgba(255, 214, 10, 0.28);
           --row-hover: rgba(255, 255, 255, 0.04);
         }
       }
       html, body {
         background: var(--bg);
         color: var(--fg);
-        margin: 0;
-        padding: 0;
-        font: 12px/1.45 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+        margin: 0; padding: 0;
+        /* `ui-monospace` resolves to SF Mono on macOS — the same face Xcode,
+           Console, and Terminal use as their default. */
+        font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+        font-feature-settings: "tnum" 1;
         -webkit-font-smoothing: antialiased;
       }
-      body { padding: 12px 14px 24px; }
-      #toolbar {
+      body { padding: 8px 14px 24px; }
+      #find {
         position: sticky; top: 0;
         background: var(--bg);
-        padding: 8px 0 8px;
-        margin: 0 -14px 8px;
-        padding-left: 14px; padding-right: 14px;
-        border-bottom: 1px solid rgba(120, 120, 128, 0.18);
+        backdrop-filter: blur(8px);
+        margin: 0 -14px;
+        padding: 6px 14px;
+        border-bottom: 1px solid var(--separator);
+        display: none;
         z-index: 10;
       }
+      #find.visible { display: flex; align-items: center; gap: 8px; }
       #q {
-        width: 100%; box-sizing: border-box;
-        padding: 6px 9px;
+        flex: 1;
+        padding: 4px 8px;
         font: inherit;
-        background: rgba(120, 120, 128, 0.12);
+        background: color-mix(in srgb, currentColor 8%, transparent);
         color: var(--fg);
         border: 1px solid transparent;
-        border-radius: 6px;
+        border-radius: 5px;
         outline: none;
       }
-      #q:focus { border-color: rgba(10, 132, 255, 0.6); background: rgba(10, 132, 255, 0.08); }
+      #q:focus { border-color: color-mix(in srgb, -apple-system-blue 60%, transparent); }
+      #count { color: var(--muted); font-size: 11px; min-width: 56px; text-align: right; }
       .row { padding: 1px 0 1px 14px; }
       .row:hover { background: var(--row-hover); }
       details { padding-left: 14px; }
@@ -220,55 +220,59 @@ public struct JSONHTMLRenderer: Sendable {
       details > summary::before {
         content: "▸";
         position: absolute; left: 0;
-        color: var(--muted);
+        color: var(--tertiary);
         font-size: 10px; line-height: 1.6;
         transition: transform 0.08s ease-out;
       }
       details[open] > summary::before { transform: rotate(90deg); }
       details > summary:hover { background: var(--row-hover); }
       .children { padding-left: 14px; }
-      .key { color: var(--key); }
-      .colon { color: var(--muted); margin-right: 2px; }
+      .key { color: var(--fg); }
+      .colon { color: var(--tertiary); margin-right: 2px; }
       .val.str { color: var(--string); }
       .val.num { color: var(--number); }
       .val.bool { color: var(--bool); }
-      .val.null { color: var(--null); font-style: italic; }
-      .val.empty { color: var(--muted); }
+      .val.null { color: var(--tertiary); font-style: italic; }
+      .val.empty { color: var(--tertiary); }
       .meta { color: var(--muted); margin-left: 4px; }
-      .hint { color: var(--hint); font-style: italic; margin-left: 6px; }
+      .hint { color: var(--tertiary); font-style: italic; margin-left: 6px; }
+      /* JWS envelope: subtle left border instead of a colored badge. */
+      details.jws { border-left: 2px solid var(--separator); padding-left: 12px; }
       .badge {
-        background: var(--jws); color: #fff;
-        padding: 0 6px; border-radius: 3px;
-        font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+        color: var(--muted);
+        font-size: 10px; font-weight: 600;
+        letter-spacing: 0.02em; text-transform: uppercase;
         margin-left: 6px;
-        vertical-align: 1px;
       }
-      details.jws > summary { color: var(--fg); }
-      details.jws { border-left: 2px solid var(--jws); margin-left: 0; }
       .match { background: var(--highlight); border-radius: 2px; }
-      #empty {
-        color: var(--muted); padding: 24px 0; text-align: center;
-        font-style: italic;
-      }
     </style>
     </head>
     <body>
-      <div id="toolbar"><input id="q" type="search" placeholder="Find in response… ⌘F" autocomplete="off" spellcheck="false"></div>
+      <div id="find">
+        <input id="q" type="search" placeholder="Find" autocomplete="off" spellcheck="false">
+        <span id="count"></span>
+      </div>
       <div id="tree">__TREE__</div>
       <script>
         (function () {
+          const find = document.getElementById('find');
           const q = document.getElementById('q');
+          const count = document.getElementById('count');
           const tree = document.getElementById('tree');
           let timer = null;
+          let matches = [];
+          let cursor = 0;
 
           function clearMatches() {
-            document.querySelectorAll('.match').forEach(el => el.classList.remove('match'));
+            matches.forEach(el => el.classList.remove('match'));
+            matches = [];
+            cursor = 0;
+            count.textContent = '';
           }
           function applySearch(term) {
             clearMatches();
             if (!term) return;
             const lower = term.toLowerCase();
-            const matches = [];
             tree.querySelectorAll('.key, .val, .meta').forEach(el => {
               if (el.textContent.toLowerCase().includes(lower)) matches.push(el);
             });
@@ -280,22 +284,44 @@ public struct JSONHTMLRenderer: Sendable {
                 p = p.parentElement;
               }
             });
-            if (matches.length > 0) matches[0].scrollIntoView({ block: 'center', behavior: 'instant' });
+            count.textContent = matches.length ? '1 of ' + matches.length : 'No matches';
+            if (matches[0]) matches[0].scrollIntoView({ block: 'center', behavior: 'instant' });
           }
+          function step(delta) {
+            if (matches.length === 0) return;
+            cursor = (cursor + delta + matches.length) % matches.length;
+            matches[cursor].scrollIntoView({ block: 'center', behavior: 'instant' });
+            count.textContent = (cursor + 1) + ' of ' + matches.length;
+          }
+
           q.addEventListener('input', () => {
             clearTimeout(timer);
             timer = setTimeout(() => applySearch(q.value.trim()), 80);
           });
+          q.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+            if (e.key === 'Escape') { hideFind(); }
+          });
 
-          // ⌘F focuses the search field instead of triggering WebKit's own.
+          function showFind() {
+            find.classList.add('visible');
+            q.focus(); q.select();
+          }
+          function hideFind() {
+            find.classList.remove('visible');
+            clearMatches();
+            q.value = '';
+          }
+
           window.addEventListener('keydown', (e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
               e.preventDefault();
-              q.focus(); q.select();
+              showFind();
+            } else if (e.key === 'Escape' && find.classList.contains('visible')) {
+              hideFind();
             }
           });
 
-          // Alt-click a value to copy its raw text.
           document.addEventListener('click', (e) => {
             if (e.altKey && (e.target.classList.contains('val') || e.target.classList.contains('key'))) {
               e.preventDefault();

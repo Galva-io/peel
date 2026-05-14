@@ -98,9 +98,8 @@ extension PeelAppDelegate {
         let menu = NSMenu(title: "View")
         item.submenu = menu
 
-        let toggleSidebar = NSMenuItem(title: "Toggle Sidebar", action: #selector(toggleSidebar(_:)), keyEquivalent: "\\")
-        toggleSidebar.target = self
-        menu.addItem(toggleSidebar)
+        // No sidebar toggle — the panes are always visible and can be
+        // collapsed by dragging the splitter.
 
         let enterFullScreen = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         enterFullScreen.keyEquivalentModifierMask = [.command, .control]
@@ -214,10 +213,6 @@ extension PeelAppDelegate {
             if alert.runModal() != .alertFirstButtonReturn { return }
         }
         store.isReadOnly.toggle()
-    }
-
-    @objc private func toggleSidebar(_ sender: Any?) {
-        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: sender)
     }
 
     @objc private func sendRequest() {

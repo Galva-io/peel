@@ -2,6 +2,9 @@ import SwiftUI
 import PeelCore
 import PeelAPI
 
+/// Lower pane of the editor split — the debug area equivalent. Top of the
+/// pane is a slim control strip (left: tab segmented, right: status pill +
+/// duration); below sits whichever of Decoded / Raw JSON / HTTP is active.
 public struct ResponseViewer: View {
     @Bindable public var store: PeelAppStore
     public let selection: SidebarSelection
@@ -25,12 +28,13 @@ public struct ResponseViewer: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
+        VStack(spacing: 0) {
+            controlStrip
             Divider()
             content
         }
-        .frame(minWidth: 380)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
         .toolbar {
             if store.lastResults[selection] != nil {
                 ToolbarItem {
@@ -50,8 +54,8 @@ public struct ResponseViewer: View {
 
     private var lastResult: PeelAppStore.DispatchResult? { store.lastResults[selection] }
 
-    private var header: some View {
-        HStack(spacing: 12) {
+    private var controlStrip: some View {
+        HStack(spacing: 10) {
             Picker("", selection: $selectedTab) {
                 ForEach(Tab.allCases) { tab in
                     Text(tab.displayName).tag(tab)
@@ -59,22 +63,24 @@ public struct ResponseViewer: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 260)
+            .controlSize(.small)
+            .frame(maxWidth: 220)
 
             Spacer()
 
             if let response = lastResult?.response {
-                Text(statusLabel(response.status))
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(statusColor(response.status).opacity(0.15), in: Capsule())
-                    .foregroundStyle(statusColor(response.status))
+                statusPill(response.status)
                 Text("\(response.durationMs) ms")
-                    .font(.caption.monospacedDigit())
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
+                Text(ByteCountFormatter.string(fromByteCount: Int64(response.body.count), countStyle: .file))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(.bar)
     }
 
     @ViewBuilder
@@ -89,21 +95,35 @@ public struct ResponseViewer: View {
                 HTTPInfoView(response: lastResult.response)
             }
         } else {
-            ContentUnavailableView(
-                "No response yet",
-                systemImage: "tray",
-                description: Text("Pick an endpoint, fill in parameters, and press Send (⌘↩).")
-            )
+            VStack(spacing: 6) {
+                Image(systemName: "tray")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.tertiary)
+                Text("No response yet")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Text("Press Send (⌘↩).")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private func statusLabel(_ status: Int) -> String {
-        switch status {
-        case 200..<300: return "\(status) OK"
-        case 400..<500: return "\(status) Client error"
-        case 500...: return "\(status) Server error"
-        default: return "\(status)"
-        }
+    private func statusPill(_ status: Int) -> some View {
+        let label: String = {
+            switch status {
+            case 200..<300: return "\(status) OK"
+            case 400..<500: return "\(status) Client error"
+            case 500...: return "\(status) Server error"
+            default: return "\(status)"
+            }
+        }()
+        return Text(label)
+            .font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(statusColor(status).opacity(0.16), in: Capsule())
+            .foregroundStyle(statusColor(status))
     }
 
     private func statusColor(_ status: Int) -> Color {
@@ -123,7 +143,7 @@ struct JSONTextView: View {
     var body: some View {
         ScrollView([.vertical, .horizontal]) {
             Text(pretty)
-                .font(.system(.caption, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .textSelection(.enabled)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,7 +191,11 @@ struct HTTPInfoView: View {
     @ViewBuilder
     private func section<Content: View>(_ title: String, @ViewBuilder _ body: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.4)
             body()
         }
     }
@@ -179,14 +203,13 @@ struct HTTPInfoView: View {
     private func keyValue(_ key: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text(key)
-                .font(.system(.caption, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .frame(width: 140, alignment: .trailing)
             Text(value)
-                .font(.system(.caption, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .textSelection(.enabled)
             Spacer()
         }
     }
 }
-

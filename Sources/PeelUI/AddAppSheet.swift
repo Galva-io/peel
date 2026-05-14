@@ -2,11 +2,27 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PeelCore
 
-/// The Add App sheet is the only place a user pastes a `.p8` private key in
-/// Peel. To make it feel less like a database form we lead with the App
-/// Store URL (or bundle id) — paste it, hit Tab, and Peel fills in the
-/// display name, bundle id, and icon by talking to Apple's public iTunes
-/// Lookup API. The user then provides Issuer ID + Key ID + the .p8 file.
+/// Add App sheet — Xcode Project Settings layout.
+///
+///   ┌─────────────────────────────────────────────────┐
+///   │                                                 │
+///   │   [Icon]   App Name                             │  Identity header
+///   │            com.example.app                      │
+///   │                                                 │
+///   │ ──────────────────────────────────────────────  │
+///   │   APP IDENTITY                                  │  Inspector form
+///   │           App Store URL  [______]  [Fetch]      │
+///   │            Display Name  [______]               │
+///   │              Bundle ID  [______]                │
+///   │                                                 │
+///   │   AUTHENTICATION                                │
+///   │              Issuer ID  [______]                │
+///   │                Key ID  [______]                 │
+///   │            Private Key  [Drop .p8 …]            │
+///   │                                                 │
+///   │ ──────────────────────────────────────────────  │
+///   │                            [Cancel]  [Add]      │
+///   └─────────────────────────────────────────────────┘
 public struct AddAppSheet: View {
     @Bindable public var store: PeelAppStore
     @Binding public var isPresented: Bool
@@ -18,13 +34,12 @@ public struct AddAppSheet: View {
     @State private var keyId = ""
     @State private var pemContents: String = ""
     @State private var pemFileName: String?
-    @State private var environmentSupport: AppEnvironmentSupport = .both
-    @State private var accentHex = "#0A84FF"
     @State private var iconData: Data?
     @State private var errorMessage: String?
     @State private var isDropTargeted = false
     @State private var isLookingUp = false
     @State private var lookupTask: Task<Void, Never>?
+    @State private var didAttemptSubmit = false
 
     public init(store: PeelAppStore, isPresented: Binding<Bool>) {
         self.store = store
@@ -32,106 +47,187 @@ public struct AddAppSheet: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            appStoreLookupField
-            iconAndForm
-            keyDropWell
-            errorBlock
-            Spacer(minLength: 0)
+        VStack(spacing: 0) {
+            identityHeader
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: InspectorFormMetrics.sectionSpacing) {
+                    appIdentitySection
+                    authenticationSection
+                    if let errorMessage {
+                        errorBanner(errorMessage)
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
+            }
+            Divider()
             footer
         }
-        .padding(24)
-        .frame(width: 540, height: 660)
+        .frame(width: 560, height: 600)
         .onDisappear { lookupTask?.cancel() }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Add an app context")
-                .font(.title3.weight(.semibold))
-            Text("Paste an App Store link or bundle id and Peel will fetch the name and icon. Drop your .p8 file to auto-fill the Key ID.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
+    // MARK: - Identity header
 
-    private var appStoreLookupField: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "link")
+    private var identityHeader: some View {
+        HStack(spacing: 14) {
+            AppIconView(app: previewConfig, size: 56)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName.isEmpty ? "New App" : displayName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(displayName.isEmpty ? .secondary : .primary)
+                Text(bundleId.isEmpty ? "Bundle ID not set" : bundleId)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                TextField(
-                    "App Store URL, app ID, or bundle id",
-                    text: $appStoreInput,
-                    prompt: Text("https://apps.apple.com/…/id1234567890")
-                )
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { triggerLookup() }
-                Button("Fetch") { triggerLookup() }
-                    .disabled(appStoreInput.trimmingCharacters(in: .whitespaces).isEmpty || isLookingUp)
-                if isLookingUp {
-                    ProgressView().controlSize(.small)
-                }
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            Text("Optional. We call Apple's public iTunes Lookup API — same one App Store badges use.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            Spacer()
         }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
     }
 
-    private var iconAndForm: some View {
-        HStack(alignment: .top, spacing: 16) {
-            previewIcon
-            Form {
-                TextField("Display name", text: $displayName)
-                TextField("Bundle ID", text: $bundleId, prompt: Text("com.example.app"))
-                TextField("Issuer ID", text: $issuerId, prompt: Text("UUID from App Store Connect"))
-                TextField("Key ID", text: $keyId, prompt: Text("10-character key ID"))
-                Picker("Environment", selection: $environmentSupport) {
-                    Text("Sandbox + Production").tag(AppEnvironmentSupport.both)
-                    Text("Sandbox only").tag(AppEnvironmentSupport.sandboxOnly)
-                    Text("Production only").tag(AppEnvironmentSupport.productionOnly)
-                }
-                ColorPicker(
-                    "Accent",
-                    selection: Binding(
-                        get: { Color(hex: accentHex) ?? .accentColor },
-                        set: { color in accentHex = color.toHexString() ?? accentHex }
-                    )
-                )
-            }
-        }
-    }
-
-    private var previewIcon: some View {
-        let preview = AppConfig(
+    private var previewConfig: AppConfig {
+        AppConfig(
             displayName: displayName.isEmpty ? "New App" : displayName,
             bundleId: bundleId,
             issuerId: issuerId,
             keyId: keyId,
-            accentColorHex: accentHex,
+            accentColorHex: derivedAccentHex,
             iconData: iconData
         )
-        return AppIconView(app: preview, size: 64)
+    }
+
+    /// Stable deterministic placeholder color from the bundle id so the
+    /// sidebar pill is differentiable even when the App Store lookup
+    /// doesn't return artwork.
+    private var derivedAccentHex: String {
+        let seed = bundleId.isEmpty ? displayName : bundleId
+        let hash = abs(seed.hashValue)
+        let palette = ["#0A84FF", "#5E5CE6", "#BF5AF2", "#FF375F", "#FF9F0A", "#30D158", "#64D2FF"]
+        return palette[hash % palette.count]
+    }
+
+    // MARK: - App Identity
+
+    private var appIdentitySection: some View {
+        InspectorFormSection(title: "App Identity") {
+            InspectorFormRow(
+                label: "App Store URL",
+                help: "Paste an App Store link or bundle id and tap Fetch."
+            ) {
+                HStack(spacing: 6) {
+                    TextField(
+                        "",
+                        text: $appStoreInput,
+                        prompt: Text("https://apps.apple.com/…/id1234567890")
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .onSubmit { triggerLookup() }
+                    if isLookingUp {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Fetch") { triggerLookup() }
+                            .controlSize(.small)
+                            .disabled(appStoreInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+
+            InspectorFormRow(label: "Display Name", isRequired: true,
+                             error: didAttemptSubmit && displayName.isEmpty ? "Required" : nil) {
+                TextField("", text: $displayName)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+            }
+
+            InspectorFormRow(
+                label: "Bundle ID",
+                isRequired: true,
+                error: bundleIdError
+            ) {
+                TextField("", text: $bundleId, prompt: Text("com.example.app"))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var bundleIdError: String? {
+        if bundleId.isEmpty { return didAttemptSubmit ? "Required" : nil }
+        return AppConfigValidator.validateBundleId(bundleId).message
+    }
+
+    // MARK: - Authentication
+
+    private var authenticationSection: some View {
+        InspectorFormSection(title: "Authentication") {
+            InspectorFormRow(
+                label: "Issuer ID",
+                isRequired: true,
+                help: "UUID from App Store Connect → Users and Access → Integrations.",
+                error: issuerIdError
+            ) {
+                TextField("", text: $issuerId, prompt: Text("UUID"))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+            }
+
+            InspectorFormRow(
+                label: "Key ID",
+                isRequired: true,
+                help: "10 characters; auto-filled when you drop the .p8 below.",
+                error: keyIdError
+            ) {
+                TextField("", text: $keyId, prompt: Text("ABCDEFGHIJ"))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+            }
+
+            InspectorFormRow(
+                label: "Private Key",
+                isRequired: true,
+                help: pemContents.isEmpty ? "Drag the AuthKey_XXXXXXXXXX.p8 file onto the well." : nil,
+                error: didAttemptSubmit && pemContents.isEmpty ? "Required" : nil
+            ) {
+                keyDropWell
+            }
+        }
+    }
+
+    private var issuerIdError: String? {
+        if issuerId.isEmpty { return didAttemptSubmit ? "Required" : nil }
+        return AppConfigValidator.validateIssuerId(issuerId).message
+    }
+
+    private var keyIdError: String? {
+        if keyId.isEmpty { return didAttemptSubmit ? "Required" : nil }
+        return AppConfigValidator.validateKeyId(keyId).message
     }
 
     private var keyDropWell: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [6, 4]))
-            .foregroundStyle(isDropTargeted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
-            .frame(height: 90)
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            .foregroundStyle(isDropTargeted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(isDropTargeted ? Color.accentColor.opacity(0.06) : Color.clear)
+            )
+            .frame(height: 52)
             .overlay {
-                VStack(spacing: 4) {
+                HStack(spacing: 8) {
                     Image(systemName: pemContents.isEmpty ? "doc.badge.arrow.up" : "key.fill")
-                        .imageScale(.large)
+                        .imageScale(.medium)
                         .foregroundStyle(.secondary)
                     if pemContents.isEmpty {
-                        Text("Drop .p8 key here").font(.callout)
+                        Text("Drop .p8 here")
+                            .font(.system(size: 12))
                     } else {
-                        Text(pemFileName.map { "Loaded \($0)" } ?? "Key loaded · \(pemContents.count) bytes")
-                            .font(.callout)
+                        Text(pemFileName ?? "Key loaded")
+                            .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -154,33 +250,43 @@ public struct AddAppSheet: View {
             }
     }
 
-    @ViewBuilder
-    private var errorBlock: some View {
-        if let errorMessage {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(PeelTheme.productionTint)
-                Text(errorMessage)
-                    .font(.callout)
-                    .foregroundStyle(.primary)
-                Spacer()
-                Button("Dismiss") { self.errorMessage = nil }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-            }
+    // MARK: - Error + footer
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .imageScale(.small)
+                .foregroundStyle(PeelTheme.productionTint)
+            Text(message)
+                .font(.system(size: 11))
+            Spacer()
+            Button("Dismiss") { errorMessage = nil }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
         }
+        .padding(8)
+        .background(PeelTheme.productionTint.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(PeelTheme.productionTint.opacity(0.3))
+        )
     }
 
     private var footer: some View {
         HStack {
+            Spacer()
             Button("Cancel") { isPresented = false }
                 .keyboardShortcut(.cancelAction)
-            Spacer()
-            Button("Add app") { Task { await commit() } }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(!canSubmit)
+            Button("Add") {
+                didAttemptSubmit = true
+                Task { await commit() }
+            }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+            .disabled(!canSubmit)
         }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Behavior
@@ -197,7 +303,6 @@ public struct AddAppSheet: View {
                 if AppStoreLookup.extractAppID(from: raw) != nil {
                     metadata = try await store.appStoreLookup.lookup(url: raw)
                 } else {
-                    // Looks like a bundle id — try that first.
                     metadata = try await store.appStoreLookup.lookup(bundleId: raw)
                 }
                 let artworkData: Data?
@@ -231,9 +336,6 @@ public struct AddAppSheet: View {
             let pem = try PEMParser.readPEM(fromFile: url)
             pemContents = pem
             pemFileName = url.lastPathComponent
-            // Apple names the file `AuthKey_XXXXXXXXXX.p8` — the trailing 10
-            // chars are the Key ID. We only auto-fill if the user hasn't
-            // typed something there already.
             let stem = url.deletingPathExtension().lastPathComponent
             if stem.hasPrefix("AuthKey_"), keyId.isEmpty {
                 keyId = String(stem.dropFirst("AuthKey_".count))
@@ -259,12 +361,11 @@ public struct AddAppSheet: View {
             bundleId: bundleId.trimmingCharacters(in: .whitespacesAndNewlines),
             issuerId: issuerId.trimmingCharacters(in: .whitespacesAndNewlines),
             keyId: keyId.trimmingCharacters(in: .whitespacesAndNewlines),
-            environmentSupport: environmentSupport,
-            accentColorHex: accentHex,
+            environmentSupport: .both,
+            accentColorHex: derivedAccentHex,
             iconData: iconData
         )
         do {
-            // Validate the PEM by trying to parse it before persisting.
             _ = try PEMParser.privateKey(fromPEM: pemContents)
             try await store.addApp(config, pem: pemContents)
             isPresented = false

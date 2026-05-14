@@ -2,6 +2,11 @@ import SwiftUI
 import PeelCore
 import PeelAPI
 
+/// The request editor — top half of the editor/debug split. Rendered as an
+/// Xcode-style inspector form: right-aligned secondary labels in a fixed
+/// gutter, control on the right, help and inline errors stacked beneath.
+/// Two sections only — Parameters and Action — separated by a 0.5-pt
+/// underline below each section header.
 public struct RequestPanel: View {
     @Bindable public var store: PeelAppStore
     public let selection: SidebarSelection
@@ -15,19 +20,19 @@ public struct RequestPanel: View {
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                endpointHeader
-                Divider()
-                parameterForm
-                Divider()
-                actions
+            VStack(alignment: .leading, spacing: InspectorFormMetrics.sectionSpacing) {
+                parametersSection
+                actionsSection
                 if showingJWT { jwtPreview }
                 if let error = store.lastErrors[selection] {
                     ErrorBanner(error: error)
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
         }
+        .frame(maxHeight: .infinity)
+        .background(.background)
         .onReceive(NotificationCenter.default.publisher(for: .peelSendRequest)) { _ in
             Task { await send() }
         }
@@ -42,43 +47,117 @@ public struct RequestPanel: View {
         )
     }
 
-    private var endpointHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(endpoint.displayName).font(.title3.weight(.semibold))
-                if endpoint.isMutating {
-                    Label("Mutating", systemImage: "exclamationmark.shield.fill")
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(PeelTheme.productionTint)
-                }
-                Spacer()
-                Link(destination: endpoint.docsURL) {
-                    Label("Docs", systemImage: "book.closed")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
-                }
-            }
-            Text(endpoint.category.displayName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
+    // MARK: - Parameters section
 
-    private var parameterForm: some View {
+    private var parametersSection: some View {
         let fields = EndpointCatalog.fields(for: endpoint)
-        return Group {
+        let suggestions = store.recentTransactionIds
+        return InspectorFormSection(title: "Parameters") {
             if fields.isEmpty {
-                Text("No parameters required.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                InspectorFormRow(label: "") {
+                    Text("No parameters required.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
             } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(fields) { field in
-                        ParameterRow(field: field, value: binding(for: field.id))
+                ForEach(fields) { field in
+                    InspectorFormRow(
+                        label: field.label,
+                        isRequired: field.isRequired,
+                        help: field.help,
+                        error: errorMessage(for: field)
+                    ) {
+                        ParameterControl(
+                            field: field,
+                            value: binding(for: field.id),
+                            transactionSuggestions: suggestions
+                        )
                     }
                 }
             }
         }
+        .onAppear { applyEndpointDefaults() }
+        .onChange(of: selection) { _, _ in applyEndpointDefaults() }
+    }
+
+    private func errorMessage(for field: ParameterField) -> String? {
+        let value = parameters.wrappedValue[field.id] ?? ""
+        guard !value.isEmpty, let message = field.validate(value).message else { return nil }
+        return message
+    }
+
+    // MARK: - Actions section
+
+    private var actionsSection: some View {
+        InspectorFormSection(title: "Action") {
+            InspectorFormActions {
+                Button {
+                    Task { await send() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if sending { ProgressView().controlSize(.small) }
+                        Text(sending ? "Sending…" : "Send")
+                    }
+                    .frame(minWidth: 72)
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(sending || !canSend)
+                .tint(store.environment == .production ? PeelTheme.productionTint : .accentColor)
+
+                Menu {
+                    Button("Copy as curl", action: copyCurl)
+                        .disabled(!canSend)
+                    Toggle("Show signed JWT", isOn: $showingJWT)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 28)
+                .help("More actions")
+            }
+        }
+    }
+
+    private var jwtPreview: some View {
+        InspectorFormSection(title: "Signed JWT") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(store.lastResults[selection]?.response.jwt ?? "(not yet signed — send to generate)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+            }
+        }
+    }
+
+    // MARK: - Behavior
+
+    /// Inject endpoint-specific defaults so the form looks usable from first
+    /// open. We only fill empty fields.
+    private func applyEndpointDefaults() {
+        var current = parameters.wrappedValue
+        var changed = false
+        switch endpoint {
+        case .getNotificationHistory:
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            let dayMs: Int64 = 24 * 60 * 60 * 1000
+            if (current["endDate"] ?? "").isEmpty {
+                current["endDate"] = "\(now)"
+                changed = true
+            }
+            if (current["startDate"] ?? "").isEmpty {
+                current["startDate"] = "\(now - dayMs)"
+                changed = true
+            }
+            if (current["itemLimit"] ?? "").isEmpty {
+                current["itemLimit"] = "20"
+                changed = true
+            }
+        default:
+            break
+        }
+        if changed { parameters.wrappedValue = current }
     }
 
     private func binding(for key: String) -> Binding<String> {
@@ -90,59 +169,6 @@ public struct RequestPanel: View {
                 parameters.wrappedValue = current
             }
         )
-    }
-
-    private var actions: some View {
-        HStack(spacing: 8) {
-            Button {
-                Task { await send() }
-            } label: {
-                HStack(spacing: 6) {
-                    if sending { ProgressView().controlSize(.small) }
-                    Text(sending ? "Sending…" : "Send")
-                }
-                .frame(minWidth: 70)
-            }
-            .keyboardShortcut(.return, modifiers: .command)
-            .buttonStyle(.borderedProminent)
-            .disabled(sending || !canSend)
-            .tint(store.environment == .production ? PeelTheme.productionTint : .accentColor)
-
-            Button("Copy as curl") { copyCurl() }
-                .disabled(!canSend)
-
-            Toggle(isOn: $showingJWT) {
-                Label("Show JWT", systemImage: "key")
-            }
-            .toggleStyle(.button)
-            .controlSize(.regular)
-
-            Spacer()
-
-            if store.environment == .production {
-                Label("Production", systemImage: "exclamationmark.octagon.fill")
-                    .foregroundStyle(PeelTheme.productionTint)
-                    .font(.caption.weight(.semibold))
-            }
-            if store.isReadOnly && endpoint.isMutating {
-                Label("Disabled by read-only mode", systemImage: "lock")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var jwtPreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("JWT").font(.caption).foregroundStyle(.secondary)
-            ScrollView(.horizontal) {
-                Text(store.lastResults[selection]?.response.jwt ?? "(not yet signed — send to generate)")
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-            }
-        }
     }
 
     private var canSend: Bool {
@@ -190,51 +216,76 @@ public struct RequestPanel: View {
     }
 }
 
-struct ParameterRow: View {
+/// The control that goes in the right column of `InspectorFormRow` for a
+/// given `ParameterField`. Bool fields use `.checkbox` (Xcode build-setting
+/// style), date fields use a compact `DatePicker`, enums use `.menu`, and
+/// transaction IDs upgrade to `AutocompleteField` when suggestions exist.
+struct ParameterControl: View {
     let field: ParameterField
     @Binding var value: String
+    var transactionSuggestions: [String] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(field.label).font(.callout.weight(.medium))
-                if field.isRequired { Text("*").foregroundStyle(PeelTheme.productionTint) }
-            }
-            input
-            if let help = field.help {
-                Text(help).font(.caption).foregroundStyle(.secondary)
-            }
-            if let message = field.validate(value).message, !value.isEmpty {
-                Text(message).font(.caption).foregroundStyle(PeelTheme.productionTint)
+        Group {
+            switch field.kind {
+            case .longText:
+                TextEditor(text: $value)
+                    .frame(minHeight: 70)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+            case let .enumeration(options):
+                Picker("", selection: $value) {
+                    Text("Any").tag("")
+                    ForEach(options, id: \.self) { opt in
+                        Text(opt).tag(opt)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+            case .bool:
+                Toggle("", isOn: Binding(
+                    get: { value.lowercased() == "true" },
+                    set: { value = $0 ? "true" : "false" }
+                ))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+            case .dateMillis:
+                DatePicker(
+                    "",
+                    selection: dateBinding(),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .controlSize(.small)
+            case .transactionId where !transactionSuggestions.isEmpty:
+                AutocompleteField(
+                    text: $value,
+                    placeholder: field.placeholder,
+                    suggestions: transactionSuggestions
+                )
+                .frame(height: 20)
+            default:
+                TextField("", text: $value, prompt: field.placeholder.map(Text.init))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
             }
         }
     }
 
-    @ViewBuilder
-    private var input: some View {
-        switch field.kind {
-        case .longText:
-            TextEditor(text: $value)
-                .frame(minHeight: 80)
-                .font(.system(.body, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-        case let .enumeration(options):
-            Picker("", selection: $value) {
-                Text("—").tag("")
-                ForEach(options, id: \.self) { opt in
-                    Text(opt).tag(opt)
-                }
+    private func dateBinding() -> Binding<Date> {
+        Binding(
+            get: {
+                guard let ms = Int64(value), ms > 0 else { return Date() }
+                return Date(timeIntervalSince1970: TimeInterval(ms) / 1000.0)
+            },
+            set: { newDate in
+                value = "\(Int64(newDate.timeIntervalSince1970 * 1000))"
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-        case .bool:
-            Toggle("", isOn: Binding(get: { value.lowercased() == "true" }, set: { value = $0 ? "true" : "false" }))
-        default:
-            TextField("", text: $value, prompt: field.placeholder.map(Text.init))
-                .textFieldStyle(.roundedBorder)
-        }
+        )
     }
 }
 
@@ -242,23 +293,24 @@ struct ErrorBanner: View {
     let error: PeelError
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                Text(error.title).font(.callout.weight(.semibold))
+                    .imageScale(.small)
+                Text(error.title).font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(PeelTheme.productionTint)
 
-            Text(error.message).font(.callout)
+            Text(error.message).font(.system(size: 11))
             if let remediation = error.remediation {
-                Text(remediation).font(.caption).foregroundStyle(.secondary)
+                Text(remediation).font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(PeelTheme.productionTint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .background(PeelTheme.productionTint.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(PeelTheme.productionTint.opacity(0.3))
         )
     }

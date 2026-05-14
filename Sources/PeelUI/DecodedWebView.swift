@@ -40,12 +40,24 @@ public struct DecodedWebView: NSViewRepresentable {
         guard context.coordinator.lastRendered != key else { return }
         context.coordinator.lastRendered = key
         let snapshot = value
-        Task.detached(priority: .userInitiated) { [weak view] in
+        // Capture `view` into an isolated Sendable box rather than the
+        // closure capture list — Swift 6 flags mutable variable captures
+        // when the closure also crosses an isolation boundary.
+        let target = WebViewBox(view: view)
+        Task.detached(priority: .userInitiated) {
             let html = JSONHTMLRenderer().render(snapshot)
-            await MainActor.run {
-                view?.loadHTMLString(html, baseURL: nil)
+            await MainActor.run { () -> Void in
+                target.view?.loadHTMLString(html, baseURL: nil)
             }
         }
+    }
+
+    /// Wraps a weak `WKWebView` reference in a Sendable shell so we can
+    /// hand it to a detached Task without tripping Swift 6's strict
+    /// concurrency checker.
+    private final class WebViewBox: @unchecked Sendable {
+        weak var view: WKWebView?
+        init(view: WKWebView) { self.view = view }
     }
 
     public final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {

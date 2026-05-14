@@ -49,6 +49,10 @@ public enum EndpointBuilder {
             )
 
         case .getNotificationHistory:
+            // `itemLimit` is Peel-internal — it controls our pagination loop
+            // and never leaves the app. `paginationToken` does leave on the
+            // query string, but it's hidden from the form: the store sets
+            // it programmatically when fetching subsequent batches.
             var body: [String: Any] = [
                 "startDate": Int(try required(parameters, "startDate")) ?? 0,
                 "endDate": Int(try required(parameters, "endDate")) ?? 0

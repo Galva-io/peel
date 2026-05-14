@@ -199,6 +199,19 @@ public final class PeelAppStore {
         guard app.environmentSupport.includes(environment) else {
             throw PeelError.validation("\(app.displayName) is not configured for \(environment.displayName).")
         }
+
+        // getNotificationHistory has its own paginated path so users can ask
+        // for "100 notifications" and we'll follow Apple's paginationToken
+        // chain transparently.
+        if endpoint == .getNotificationHistory, let limit = Int(parameters["itemLimit"] ?? ""), limit > 0 {
+            return try await sendPaginated(
+                endpoint: endpoint,
+                parameters: parameters,
+                limit: limit,
+                app: app
+            )
+        }
+
         let spec = try EndpointBuilder.build(endpoint: endpoint, parameters: parameters)
         let response = try await client.dispatch(.init(
             appConfig: app,
@@ -211,6 +224,116 @@ public final class PeelAppStore {
             guard let parsed = try? JSONValue(data: response.body) else { return .object([]) }
             return JWSDecoder().decodeTree(parsed)
         }()
+        try await recordDispatch(
+            app: app,
+            endpoint: endpoint,
+            parameters: parameters,
+            response: response
+        )
+        return DispatchResult(response: response, decoded: decoded)
+    }
+
+    /// Walks Apple's `paginationToken` chain for `getNotificationHistory`
+    /// until we have `limit` items or the server says `hasMore = false`.
+    /// Returns a single synthesized result whose body merges every batch.
+    private func sendPaginated(
+        endpoint: EndpointID,
+        parameters: RequestParameters,
+        limit: Int,
+        app: AppConfig
+    ) async throws -> DispatchResult {
+        var working = parameters
+        working["paginationToken"] = nil
+        // itemLimit is Peel-only; strip it so it doesn't slip into anything
+        // the builder might serialize.
+        working.values.removeValue(forKey: "itemLimit")
+
+        var collected: [JSONValue] = []
+        var lastResponse: PeelAPI.Client.APIResponse?
+        var totalDurationMs = 0
+        var batches = 0
+        var hitError: PeelAPI.Client.APIResponse?
+
+        while collected.count < limit {
+            let spec = try EndpointBuilder.build(endpoint: endpoint, parameters: working)
+            let response = try await client.dispatch(.init(
+                appConfig: app,
+                environment: environment,
+                spec: spec,
+                readOnly: isReadOnly
+            ))
+            batches += 1
+            totalDurationMs += response.durationMs
+            lastResponse = response
+
+            // On a non-2xx, bail with what we have and surface the response.
+            guard response.isSuccess, let parsed = try? JSONValue(data: response.body) else {
+                hitError = response
+                break
+            }
+
+            if let items = parsed["notificationHistory"]?.arrayValue {
+                for item in items {
+                    collected.append(item)
+                    if collected.count >= limit { break }
+                }
+            }
+            if collected.count >= limit { break }
+
+            // Apple signals end-of-stream via hasMore=false. If absent, stop.
+            guard let hasMore = parsed["hasMore"]?.boolValue, hasMore,
+                  let nextToken = parsed["paginationToken"]?.stringValue, !nextToken.isEmpty else {
+                break
+            }
+            working["paginationToken"] = nextToken
+        }
+
+        lastAction = Date()
+
+        // Build a synthesized response body that looks like a normal Apple
+        // response — same shape, but `_peelBatches` tells the user we made
+        // multiple calls under the hood.
+        let merged: JSONValue = .object([
+            JSONValue.Pair("notificationHistory", .array(Array(collected.prefix(limit)))),
+            JSONValue.Pair("hasMore", .bool(false)),
+            JSONValue.Pair("_peelBatches", .number(JSONNumber("\(batches)"))),
+            JSONValue.Pair("_peelTotalDurationMs", .number(JSONNumber("\(totalDurationMs)")))
+        ])
+        let mergedData = Data(merged.encodeCompact().utf8)
+        let decoded = JWSDecoder().decodeTree(merged)
+
+        // Use the final batch's response shape (URL, headers, status) but
+        // swap the body so the rest of the app sees the merged view.
+        let representative = lastResponse ?? hitError ?? PeelAPI.Client.APIResponse(
+            request: URLRequest(url: environment.baseURL),
+            status: 0, body: Data(), headers: [:], durationMs: 0, jwt: ""
+        )
+        let synthesizedResponse = PeelAPI.Client.APIResponse(
+            request: representative.request,
+            status: hitError?.status ?? 200,
+            body: mergedData,
+            headers: representative.headers,
+            durationMs: totalDurationMs,
+            jwt: representative.jwt,
+            diagnosis: hitError?.diagnosis
+        )
+
+        try await recordDispatch(
+            app: app,
+            endpoint: endpoint,
+            parameters: parameters, // record the user's original params, not the internal `working`
+            response: synthesizedResponse
+        )
+
+        return DispatchResult(response: synthesizedResponse, decoded: decoded)
+    }
+
+    private func recordDispatch(
+        app: AppConfig,
+        endpoint: EndpointID,
+        parameters: RequestParameters,
+        response: PeelAPI.Client.APIResponse
+    ) async throws {
         _ = try await storage.recordHistory(
             appConfigId: app.id,
             environment: environment,
@@ -235,7 +358,22 @@ public final class PeelAppStore {
         try await storage.appendAudit(audit)
         await reloadHistory()
         await reloadAudit()
-        return DispatchResult(response: response, decoded: decoded)
+    }
+
+    /// Up to 20 unique transaction IDs the user has entered across every
+    /// endpoint. Powers the autocomplete dropdown on transaction-ID fields.
+    public var recentTransactionIds: [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for record in history {
+            for key in ["transactionId", "originalTransactionId"] {
+                guard let value = record.parameters[key], !value.isEmpty, !seen.contains(value) else { continue }
+                seen.insert(value)
+                ordered.append(value)
+                if ordered.count >= 20 { return ordered }
+            }
+        }
+        return ordered
     }
 
     public func startWebhookListener() async {
