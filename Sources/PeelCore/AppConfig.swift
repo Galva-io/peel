@@ -15,6 +15,9 @@ public struct AppConfig: Codable, Sendable, Hashable, Identifiable {
     public var isPinned: Bool
     public var sortOrder: Int
     public var createdAt: Date
+    /// PNG bytes fetched from the iTunes Lookup API. Kept inline because the
+    /// 100/512px artwork Apple serves is well under 100 KB.
+    public var iconData: Data?
 
     public init(
         id: UUID = UUID(),
@@ -26,7 +29,8 @@ public struct AppConfig: Codable, Sendable, Hashable, Identifiable {
         accentColorHex: String = "#0A84FF",
         isPinned: Bool = false,
         sortOrder: Int = 0,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        iconData: Data? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -38,6 +42,7 @@ public struct AppConfig: Codable, Sendable, Hashable, Identifiable {
         self.isPinned = isPinned
         self.sortOrder = sortOrder
         self.createdAt = createdAt
+        self.iconData = iconData
     }
 
     public var keychainAccount: String { "\(id.uuidString).p8" }

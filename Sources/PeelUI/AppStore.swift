@@ -13,7 +13,6 @@ import PeelWebhook
 @Observable
 public final class PeelAppStore {
     public var apps: [AppConfig] = []
-    public var activeAppId: UUID?
     public var environment: APIEnvironment = .sandbox
     public var isReadOnly: Bool = true
     public var auditTrail: [AuditEntry] = []
@@ -22,27 +21,53 @@ public final class PeelAppStore {
     public var listenerState: LocalListener.State = .stopped
     public var receivedNotifications: [LocalListener.ReceivedNotification] = []
 
+    /// Sidebar selection is the canonical (app, endpoint) tuple. The active
+    /// app and active endpoint are derived from it; every other view binds
+    /// against the derived values.
+    public var sidebarSelection: SidebarSelection?
+
+    /// Which app rows are expanded in the sidebar. Persisted via UserDefaults
+    /// so the sidebar reopens in the same shape.
+    public var expandedAppIds: Set<UUID> = []
+
+    /// Parameter cache per (app, endpoint). When you switch endpoints in the
+    /// sidebar, the previously typed inputs are restored.
+    public var requestParameters: [SidebarSelection: RequestParameters] = [:]
+
+    /// Latest dispatch result and error per selection. Same restoration
+    /// behaviour as `requestParameters`.
+    public var lastResults: [SidebarSelection: DispatchResult] = [:]
+    public var lastErrors: [SidebarSelection: PeelError] = [:]
+
     public let storage: Storage
     public let keychain: KeychainStore
     public let client: PeelAPI.Client
     public let webhookListener: LocalListener
+    public let appStoreLookup: AppStoreLookup
 
     public init(
         storage: Storage,
         keychain: KeychainStore = KeychainStore(),
         client: PeelAPI.Client? = nil,
-        listener: LocalListener = LocalListener()
+        listener: LocalListener = LocalListener(),
+        appStoreLookup: AppStoreLookup = AppStoreLookup()
     ) {
         self.storage = storage
         self.keychain = keychain
         self.client = client ?? PeelAPI.Client(keyFetcher: KeychainKeyFetcher(store: keychain))
         self.webhookListener = listener
+        self.appStoreLookup = appStoreLookup
     }
 
     public func bootstrap() async {
         await reloadApps()
         await reloadHistory()
         await reloadAudit()
+        restoreExpansionState()
+        if sidebarSelection == nil, let first = apps.first {
+            sidebarSelection = SidebarSelection(appId: first.id, endpoint: .getAllSubscriptionStatuses)
+            expandedAppIds.insert(first.id)
+        }
         let listener = webhookListener
         _ = await listener.addHandler { [weak self] notification in
             Task { @MainActor in
@@ -51,10 +76,42 @@ public final class PeelAppStore {
         }
     }
 
+    public var activeAppId: UUID? { sidebarSelection?.appId }
+    public var activeApp: AppConfig? {
+        guard let id = activeAppId else { return nil }
+        return apps.first(where: { $0.id == id })
+    }
+    public var activeEndpoint: EndpointID? { sidebarSelection?.endpoint }
+
+    public func select(appId: UUID, endpoint: EndpointID) {
+        let selection = SidebarSelection(appId: appId, endpoint: endpoint)
+        sidebarSelection = selection
+        expandedAppIds.insert(appId)
+        persistExpansionState()
+    }
+
+    public func toggleExpansion(for appId: UUID) {
+        if expandedAppIds.contains(appId) {
+            expandedAppIds.remove(appId)
+        } else {
+            expandedAppIds.insert(appId)
+        }
+        persistExpansionState()
+    }
+
+    private func restoreExpansionState() {
+        let ids = (UserDefaults.standard.array(forKey: "io.galva.peel.expandedAppIds") as? [String]) ?? []
+        expandedAppIds = Set(ids.compactMap(UUID.init(uuidString:)))
+    }
+
+    private func persistExpansionState() {
+        UserDefaults.standard.set(expandedAppIds.map(\.uuidString),
+                                  forKey: "io.galva.peel.expandedAppIds")
+    }
+
     public func reloadApps() async {
         do {
             apps = try await storage.allAppConfigs()
-            if activeAppId == nil { activeAppId = apps.first?.id }
         } catch {
             PeelLog.persistence.error("Reload apps failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -76,16 +133,21 @@ public final class PeelAppStore {
         }
     }
 
-    public var activeApp: AppConfig? {
-        guard let id = activeAppId else { return nil }
-        return apps.first(where: { $0.id == id })
-    }
+    // MARK: - App lifecycle
 
     public func addApp(_ config: AppConfig, pem: String) async throws {
         try keychain.store(pem: pem, account: config.keychainAccount)
         try await storage.saveAppConfig(config)
         await reloadApps()
-        if activeAppId == nil { activeAppId = config.id }
+        if sidebarSelection == nil {
+            sidebarSelection = SidebarSelection(appId: config.id, endpoint: .getAllSubscriptionStatuses)
+        }
+        expandedAppIds.insert(config.id)
+        persistExpansionState()
+        // Fetch icon in the background; failure is silent.
+        if config.iconData == nil {
+            Task { await self.refreshIcon(for: config.id) }
+        }
     }
 
     public func updateApp(_ config: AppConfig) async throws {
@@ -97,9 +159,32 @@ public final class PeelAppStore {
         try? keychain.delete(account: AppConfig(id: id, displayName: "", bundleId: "", issuerId: "", keyId: "").keychainAccount)
         try await storage.deleteAppConfig(id: id)
         await client.evictCachedJWT(for: id)
+        expandedAppIds.remove(id)
+        if activeAppId == id {
+            sidebarSelection = apps.first(where: { $0.id != id }).map {
+                SidebarSelection(appId: $0.id, endpoint: .getAllSubscriptionStatuses)
+            }
+        }
+        persistExpansionState()
         await reloadApps()
-        if activeAppId == id { activeAppId = apps.first?.id }
     }
+
+    public func refreshIcon(for appId: UUID) async {
+        guard let app = apps.first(where: { $0.id == appId }) else { return }
+        do {
+            let metadata = try await appStoreLookup.lookup(bundleId: app.bundleId)
+            guard let artworkURL = metadata.artworkURL else { return }
+            let data = try await appStoreLookup.downloadArtwork(artworkURL)
+            var updated = app
+            updated.iconData = data
+            try await storage.saveAppConfig(updated)
+            await reloadApps()
+        } catch {
+            PeelLog.api.info("Icon lookup skipped for \(app.bundleId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    // MARK: - Dispatch
 
     public struct DispatchResult: Sendable {
         public let response: PeelAPI.Client.APIResponse
@@ -165,6 +250,17 @@ public final class PeelAppStore {
     public func stopWebhookListener() async {
         await webhookListener.stop()
         listenerState = await webhookListener.state
+    }
+}
+
+/// Sidebar selection identifies the (app, endpoint) tuple currently shown in
+/// the detail panel. `Hashable` for use as a dictionary key (parameter cache).
+public struct SidebarSelection: Hashable, Sendable, Codable {
+    public let appId: UUID
+    public let endpoint: EndpointID
+    public init(appId: UUID, endpoint: EndpointID) {
+        self.appId = appId
+        self.endpoint = endpoint
     }
 }
 

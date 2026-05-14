@@ -4,38 +4,26 @@ import PeelAPI
 
 public struct RequestPanel: View {
     @Bindable public var store: PeelAppStore
-    @Binding public var endpoint: EndpointID
-    @Binding public var parameters: RequestParameters
-    @Binding public var lastResult: PeelAppStore.DispatchResult?
-    @Binding public var lastError: PeelError?
+    public let selection: SidebarSelection
     @State private var showingJWT = false
     @State private var sending = false
 
-    public init(
-        store: PeelAppStore,
-        endpoint: Binding<EndpointID>,
-        parameters: Binding<RequestParameters>,
-        lastResult: Binding<PeelAppStore.DispatchResult?>,
-        lastError: Binding<PeelError?>
-    ) {
+    public init(store: PeelAppStore, selection: SidebarSelection) {
         self.store = store
-        self._endpoint = endpoint
-        self._parameters = parameters
-        self._lastResult = lastResult
-        self._lastError = lastError
+        self.selection = selection
     }
 
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                endpointPicker
+                endpointHeader
                 Divider()
                 parameterForm
                 Divider()
                 actions
                 if showingJWT { jwtPreview }
-                if let lastError {
-                    ErrorBanner(error: lastError)
+                if let error = store.lastErrors[selection] {
+                    ErrorBanner(error: error)
                 }
             }
             .padding(16)
@@ -45,36 +33,34 @@ public struct RequestPanel: View {
         }
     }
 
-    private var endpointPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Endpoint").font(.caption).foregroundStyle(.secondary)
-            Picker("Endpoint", selection: $endpoint) {
-                ForEach(EndpointID.Category.allCases, id: \.self) { category in
-                    Section(category.displayName) {
-                        ForEach(EndpointID.allCases.filter { $0.category == category }, id: \.self) { id in
-                            HStack {
-                                Text(id.displayName)
-                                if id.isMutating {
-                                    Image(systemName: "exclamationmark.shield")
-                                        .imageScale(.small)
-                                        .foregroundStyle(PeelTheme.productionTint)
-                                }
-                            }
-                            .tag(id)
-                        }
-                    }
+    private var endpoint: EndpointID { selection.endpoint }
+
+    private var parameters: Binding<RequestParameters> {
+        Binding(
+            get: { store.requestParameters[selection] ?? RequestParameters() },
+            set: { store.requestParameters[selection] = $0 }
+        )
+    }
+
+    private var endpointHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(endpoint.displayName).font(.title3.weight(.semibold))
+                if endpoint.isMutating {
+                    Label("Mutating", systemImage: "exclamationmark.shield.fill")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(PeelTheme.productionTint)
+                }
+                Spacer()
+                Link(destination: endpoint.docsURL) {
+                    Label("Docs", systemImage: "book.closed")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
                 }
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .onChange(of: endpoint) { _, _ in
-                parameters = RequestParameters()
-            }
-            HStack(spacing: 8) {
-                Image(systemName: "book.closed")
-                Link("API documentation", destination: endpoint.docsURL)
-                    .font(.caption)
-            }.foregroundStyle(.secondary)
+            Text(endpoint.category.displayName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -96,11 +82,14 @@ public struct RequestPanel: View {
     }
 
     private func binding(for key: String) -> Binding<String> {
-        Binding(get: {
-            parameters[key] ?? ""
-        }, set: { v in
-            parameters[key] = v
-        })
+        Binding(
+            get: { parameters.wrappedValue[key] ?? "" },
+            set: { v in
+                var current = parameters.wrappedValue
+                current[key] = v
+                parameters.wrappedValue = current
+            }
+        )
     }
 
     private var actions: some View {
@@ -119,10 +108,8 @@ public struct RequestPanel: View {
             .disabled(sending || !canSend)
             .tint(store.environment == .production ? PeelTheme.productionTint : .accentColor)
 
-            Button("Copy as curl") {
-                copyCurl()
-            }
-            .disabled(canSend == false)
+            Button("Copy as curl") { copyCurl() }
+                .disabled(!canSend)
 
             Toggle(isOn: $showingJWT) {
                 Label("Show JWT", systemImage: "key")
@@ -149,7 +136,7 @@ public struct RequestPanel: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("JWT").font(.caption).foregroundStyle(.secondary)
             ScrollView(.horizontal) {
-                Text(lastResult?.response.jwt ?? "(not yet signed — send to generate)")
+                Text(store.lastResults[selection]?.response.jwt ?? "(not yet signed — send to generate)")
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .padding(8)
@@ -162,29 +149,30 @@ public struct RequestPanel: View {
         guard store.activeApp != nil else { return false }
         let fields = EndpointCatalog.fields(for: endpoint)
         for f in fields {
-            if !f.validate(parameters[f.id]).isValid { return false }
+            if !f.validate(parameters.wrappedValue[f.id]).isValid { return false }
         }
         if store.isReadOnly && endpoint.isMutating { return false }
         return true
     }
 
     private func send() async {
+        guard canSend else { return }
         sending = true
         defer { sending = false }
         do {
-            let result = try await store.send(endpoint: endpoint, parameters: parameters)
-            self.lastResult = result
-            self.lastError = nil
+            let result = try await store.send(endpoint: endpoint, parameters: parameters.wrappedValue)
+            store.lastResults[selection] = result
+            store.lastErrors[selection] = nil
         } catch let error as PeelError {
-            self.lastError = error
+            store.lastErrors[selection] = error
         } catch {
-            self.lastError = PeelError(kind: .unknown, title: "Unexpected", message: error.localizedDescription)
+            store.lastErrors[selection] = PeelError(kind: .unknown, title: "Unexpected", message: error.localizedDescription)
         }
     }
 
     private func copyCurl() {
         do {
-            let spec = try EndpointBuilder.build(endpoint: endpoint, parameters: parameters)
+            let spec = try EndpointBuilder.build(endpoint: endpoint, parameters: parameters.wrappedValue)
             guard let app = store.activeApp else { return }
             let url = spec.url(in: store.environment)
             var request = URLRequest(url: url)

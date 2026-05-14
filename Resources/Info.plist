@@ -8,7 +8,11 @@
     <string>Peel</string>
     <key>CFBundleExecutable</key>
     <string>Peel</string>
-    <key>CFBundleIconFile</key>
+    <!-- Asset catalog-based icon. actool reads AppIcon from Assets.xcassets
+         and writes the relevant Icon-Mac* entries into the compiled
+         Info.plist. CFBundleIconFile is only needed for legacy .icns
+         bundles. -->
+    <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>io.galva.peel</string>

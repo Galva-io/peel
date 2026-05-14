@@ -17,6 +17,10 @@ public final class StoredAppConfig {
     public var isPinned: Bool
     public var sortOrder: Int
     public var createdAt: Date
+    /// Optional because SwiftData migrations of existing stores need a
+    /// nilable default. Existing rows pick up `nil` until the user edits the
+    /// app and Peel fetches its icon.
+    public var iconData: Data?
 
     public init(from config: AppConfig) {
         self.id = config.id
@@ -29,6 +33,7 @@ public final class StoredAppConfig {
         self.isPinned = config.isPinned
         self.sortOrder = config.sortOrder
         self.createdAt = config.createdAt
+        self.iconData = config.iconData
     }
 
     public func toValue() -> AppConfig {
@@ -42,7 +47,8 @@ public final class StoredAppConfig {
             accentColorHex: accentColorHex,
             isPinned: isPinned,
             sortOrder: sortOrder,
-            createdAt: createdAt
+            createdAt: createdAt,
+            iconData: iconData
         )
     }
 
@@ -55,6 +61,7 @@ public final class StoredAppConfig {
         accentColorHex = config.accentColorHex
         isPinned = config.isPinned
         sortOrder = config.sortOrder
+        iconData = config.iconData
     }
 }
 

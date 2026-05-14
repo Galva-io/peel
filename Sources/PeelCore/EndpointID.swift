@@ -73,6 +73,31 @@ public enum EndpointID: String, CaseIterable, Codable, Sendable, Identifiable {
         }
     }
 
+    /// HTTP verb this endpoint hits. Surfaces in the sidebar as a colored
+    /// badge (GET=read, PUT/POST=write) so users can see at a glance what a
+    /// row will do.
+    public var httpMethod: HTTPMethod {
+        switch self {
+        case .getAllSubscriptionStatuses, .getTransactionInfo, .getTransactionHistory,
+             .lookUpOrderId, .getTestNotificationStatus, .getRefundHistory,
+             .getStatusOfSubscriptionRenewalDateExtensions:
+            return .get
+        case .sendTestNotification, .getNotificationHistory,
+             .extendSubscriptionRenewalDateForAllActiveSubscribers:
+            return .post
+        case .requestRefund, .extendSubscriptionRenewalDate, .setAppAccountToken:
+            return .put
+        }
+    }
+
+    public enum HTTPMethod: String, Sendable {
+        case get = "GET"
+        case post = "POST"
+        case put = "PUT"
+
+        public var label: String { rawValue }
+    }
+
     public var docsURL: URL {
         let slug: String
         switch self {
