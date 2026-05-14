@@ -208,28 +208,42 @@ public struct AddAppSheet: View {
         return AppConfigValidator.validateKeyId(keyId).message
     }
 
+    /// Combined PEM input: a monospaced TextEditor users can paste the .p8
+    /// contents into, with a "Choose File…" button beside it for the
+    /// classic file picker. Drag-and-drop still works onto the editor.
     private var keyDropWell: some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-            .foregroundStyle(isDropTargeted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(isDropTargeted ? Color.accentColor.opacity(0.06) : Color.clear)
-            )
-            .frame(height: 52)
-            .overlay {
-                HStack(spacing: 8) {
-                    Image(systemName: pemContents.isEmpty ? "doc.badge.arrow.up" : "key.fill")
-                        .imageScale(.medium)
-                        .foregroundStyle(.secondary)
-                    if pemContents.isEmpty {
-                        Text("Drop .p8 here")
-                            .font(.system(size: 12))
-                    } else {
-                        Text(pemFileName ?? "Key loaded")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $pemContents)
+                    .font(.system(size: 11, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .frame(minHeight: 86, maxHeight: 120)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(isDropTargeted ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.12),
+                                          lineWidth: isDropTargeted ? 1.2 : 0.5)
+                    )
+                    .onChange(of: pemContents) { _, newValue in
+                        // If the user pastes a key by hand we no longer know
+                        // which file it came from; drop the filename so we
+                        // don't lie about provenance.
+                        if pemFileName != nil, !newValue.contains(pemFileName ?? "") {
+                            pemFileName = nil
+                        }
                     }
+
+                if pemContents.isEmpty {
+                    Text(placeholderPEM)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 13)
+                        .allowsHitTesting(false)
                 }
             }
             .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
@@ -240,14 +254,54 @@ public struct AddAppSheet: View {
                 }
                 return true
             }
-            .contextMenu {
-                Button("Paste from clipboard") {
-                    if let pasted = NSPasteboard.general.string(forType: .string) {
-                        pemContents = pasted
-                        pemFileName = nil
-                    }
+
+            HStack(spacing: 8) {
+                Button("Choose File…") { openKeyPanel() }
+                    .controlSize(.small)
+                if let pemFileName {
+                    Text(pemFileName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else if !pemContents.isEmpty {
+                    Text("\(pemContents.count) characters pasted")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("or drop a .p8 file onto the field above")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
                 }
+                Spacer()
             }
+        }
+    }
+
+    private var placeholderPEM: String {
+        """
+        -----BEGIN PRIVATE KEY-----
+        Paste the contents of your AuthKey_XXXXXXXXXX.p8 here
+        -----END PRIVATE KEY-----
+        """
+    }
+
+    private func openKeyPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose your .p8 private key"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        // Allow `.p8` (a dynamic UTI created from the extension) and
+        // fall back to plain text so users can pick exported PEM files.
+        if let p8 = UTType(filenameExtension: "p8") {
+            panel.allowedContentTypes = [p8, .text]
+        } else {
+            panel.allowedContentTypes = [.text, .data]
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            Task { @MainActor in await self.loadKey(from: url) }
+        }
     }
 
     // MARK: - Error + footer

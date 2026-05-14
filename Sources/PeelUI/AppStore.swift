@@ -169,6 +169,18 @@ public final class PeelAppStore {
         await reloadApps()
     }
 
+    /// Drops a demo app into the sidebar so first-launch users can explore
+    /// the workbench without real credentials. If the demo already exists
+    /// we just focus it instead of inserting a duplicate.
+    public func addExampleApp() async throws {
+        if let existing = apps.first(where: { $0.bundleId == ExampleAppFactory.bundleId }) {
+            select(appId: existing.id, endpoint: .getAllSubscriptionStatuses)
+            return
+        }
+        let (config, pem) = ExampleAppFactory.make()
+        try await addApp(config, pem: pem)
+    }
+
     public func refreshIcon(for appId: UUID) async {
         guard let app = apps.first(where: { $0.id == appId }) else { return }
         do {

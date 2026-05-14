@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import PeelCore
 import PeelAPI
 
@@ -16,7 +17,7 @@ public struct MainContent: View {
             if let selection = store.sidebarSelection, store.activeApp != nil {
                 editor(for: selection)
             } else {
-                EmptyStatePanel(hasApps: !store.apps.isEmpty)
+                EmptyStatePanel(store: store, hasApps: !store.apps.isEmpty)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -37,9 +38,10 @@ public struct MainContent: View {
     }
 }
 
-/// Empty-state when no app/endpoint is selected. Centered mark, single CTA,
-/// help popover behind a "?" — same as before, kept brief.
+/// Empty-state when no app/endpoint is selected. Shows the app icon, a
+/// short headline, two CTAs (real and example), and a "?" help popover.
 struct EmptyStatePanel: View {
+    @Bindable var store: PeelAppStore
     let hasApps: Bool
     @State private var showingTips = false
 
@@ -55,16 +57,7 @@ struct EmptyStatePanel: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
-                Button {
-                    NotificationCenter.default.post(name: .peelAddAppRequested, object: nil)
-                } label: {
-                    Text(hasApps ? "Add Another App" : "Add an App")
-                        .frame(minWidth: 120)
-                }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-                .padding(.top, 4)
+                actionButtons
                 Spacer(minLength: 32)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -85,16 +78,14 @@ struct EmptyStatePanel: View {
         .background(.background)
     }
 
+    /// The real 1024-pt app icon, served from the compiled asset catalog
+    /// via `NSApplication.shared.applicationIconImage`. No more "P" tile.
     private var mark: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.accentColor.gradient)
-            .frame(width: 76, height: 76)
-            .overlay(
-                Text("P")
-                    .font(.system(size: 40, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.95))
-            )
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 112, height: 112)
+            .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
     }
 
     private var headline: String { hasApps ? "Pick an endpoint" : "Welcome to Peel" }
@@ -102,7 +93,36 @@ struct EmptyStatePanel: View {
     private var blurb: String {
         hasApps
             ? "Choose an endpoint under one of your apps in the sidebar."
-            : "A workbench for Apple's App Store Server API. Add an app to start."
+            : "A workbench for Apple's App Store Server API. Add an app to start — or kick the tires with the example."
+    }
+
+    /// Two stacked actions on a fresh install. Primary (Add an App) is
+    /// prominent; the example link is a borderless secondary that doesn't
+    /// compete for attention. Once the user has at least one real app the
+    /// example link disappears.
+    @ViewBuilder
+    private var actionButtons: some View {
+        VStack(spacing: 8) {
+            Button {
+                NotificationCenter.default.post(name: .peelAddAppRequested, object: nil)
+            } label: {
+                Text(hasApps ? "Add Another App" : "Add an App")
+                    .frame(minWidth: 140)
+            }
+            .controlSize(.large)
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+
+            if !hasApps {
+                Button("Add Example App") {
+                    Task { try? await store.addExampleApp() }
+                }
+                .buttonStyle(.borderless)
+                .font(.callout)
+                .controlSize(.small)
+                .help("Adds a sandbox-only demo app with a generated key so you can explore the UI before wiring up real credentials.")
+            }
+        }
     }
 }
 

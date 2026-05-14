@@ -40,7 +40,9 @@ public struct SidebarView: View {
             filterBar
         }
         .frame(minWidth: 220)
-        .background(.regularMaterial)
+        // Flat, opaque background — matches the top bar so the three
+        // window chromes (top / sidebar / status) read as one piece.
+        .background(.background)
         .sheet(isPresented: $showingAddApp) {
             AddAppSheet(store: store, isPresented: $showingAddApp)
         }
@@ -218,34 +220,21 @@ struct AppRow: View {
     }
 }
 
-/// Endpoint "leaf" row. 11-pt body, tertiary-tinted glyph, no chrome —
-/// typography carries the row. Destructive endpoints (PUT or mutating
-/// POST) tint their glyph with the warning color so the eye catches them.
+/// Endpoint "leaf" row. Pure text — no glyph, no badge. Matches the
+/// developer-tool aesthetic (VS Code's Explorer, Xcode's file list) where
+/// the file name is the row. Destructive endpoints are still flagged by
+/// the request header, the inspector, and the read-only switch — the
+/// sidebar's job is navigation, not signage.
 struct EndpointRow: View {
     let endpoint: EndpointID
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: glyph)
-                .imageScale(.small)
-                .frame(width: 12)
-                .foregroundStyle(endpoint.isMutating ? AnyShapeStyle(PeelTheme.productionTint) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
-                .accessibilityHidden(true)
-            Text(endpoint.displayName)
-                .font(.system(size: 11))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
-        }
-        .accessibilityLabel("\(endpoint.displayName)\(endpoint.isMutating ? ", destructive" : "")")
-    }
-
-    private var glyph: String {
-        switch endpoint.httpMethod {
-        case .get: return "arrow.down.circle"
-        case .post: return "paperplane"
-        case .put: return "pencil"
-        }
+        Text(endpoint.displayName)
+            .font(.system(size: 11))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("\(endpoint.displayName)\(endpoint.isMutating ? ", destructive" : "")")
     }
 }
 
