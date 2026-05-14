@@ -1,68 +1,165 @@
 name: Release
 
-# Triggered by a semver tag push. The publish workflow signs, notarizes, and
-# uploads the DMG to a GitHub Release. Notarization/signing secrets must be
-# provisioned ahead of time:
+# Tag push (v1.2.3) builds a signed DMG and uploads it to GitHub Releases.
+# Workflow_dispatch lets maintainers trigger an unsigned development build
+# from the Actions tab without cutting a tag.
 #
-#   APPLE_DEVELOPER_ID_CERT_BASE64
-#   APPLE_DEVELOPER_ID_CERT_PASSWORD
-#   APPLE_NOTARIZATION_USER
-#   APPLE_NOTARIZATION_PASSWORD
-#   APPLE_TEAM_ID
+# Code signing + notarization is optional. The workflow always produces a
+# downloadable `.zip` of `Peel.app`; if the Apple Developer secrets are
+# configured it additionally signs, notarizes, and ships a `.dmg`. Forks
+# without those secrets still get a working release pipeline.
 
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional version label for the artifact (e.g. 1.2.3-dev)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
 
 jobs:
-  release:
-    name: Sign + notarize + upload
+  build:
+    name: Build, sign, package
     runs-on: macos-14
-    permissions:
-      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.4.app
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            version="0.0.0-dev-${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version: $version"
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            .swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Run tests
+        run: swift test --parallel
+
       - name: Build release
         run: swift build -c release
-      - name: Bundle
+
+      - name: Stamp Info.plist with release version
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
+
+      - name: Bundle .app
         run: ./scripts/bundle.sh release
-      - name: Import signing certificate
+
+      - name: Check for code signing secrets
+        id: signing
+        run: |
+          if [[ -n "${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::APPLE_DEVELOPER_ID_CERT_BASE64 is not set — shipping an unsigned, un-notarized build. See docs/RELEASING.md."
+          fi
+
+      - name: Import Developer ID certificate
+        if: steps.signing.outputs.available == 'true'
         env:
           CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
           CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
         run: |
-          echo "$CERT_BASE64" | base64 --decode > certificate.p12
-          security create-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -s build.keychain
+          echo "$CERT_BASE64" | base64 --decode > /tmp/certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
           security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
-      - name: Codesign
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import /tmp/certificate.p12 \
+              -k build.keychain \
+              -P "$CERT_PASSWORD" \
+              -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm /tmp/certificate.p12
+
+      - name: Codesign with Developer ID
+        if: steps.signing.outputs.available == 'true'
         run: |
-          codesign --force --deep --options runtime \
+          codesign --force --deep --options runtime --timestamp \
               --sign "Developer ID Application" \
               --entitlements Resources/Peel.entitlements \
               build/Peel.app
-      - name: Make DMG
+          codesign --verify --strict --deep build/Peel.app
+          codesign -dv --verbose=2 build/Peel.app
+
+      - name: Build DMG
         run: |
-          hdiutil create -volname "Peel" -srcfolder build/Peel.app -ov -format UDZO build/Peel.dmg
+          mkdir -p build/dmg-stage
+          cp -R build/Peel.app build/dmg-stage/
+          ln -s /Applications build/dmg-stage/Applications
+          hdiutil create \
+              -volname "Peel ${{ steps.version.outputs.version }}" \
+              -srcfolder build/dmg-stage \
+              -ov -format UDZO \
+              "build/Peel-${{ steps.version.outputs.version }}.dmg"
+
+      - name: Codesign DMG
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          codesign --force --sign "Developer ID Application" --timestamp \
+              "build/Peel-${{ steps.version.outputs.version }}.dmg"
+
       - name: Notarize
+        if: steps.signing.outputs.available == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_USER }}
           APP_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcrun notarytool submit build/Peel.dmg \
+          xcrun notarytool submit \
+              "build/Peel-${{ steps.version.outputs.version }}.dmg" \
               --apple-id "$APPLE_ID" \
               --password "$APP_PASSWORD" \
               --team-id "$TEAM_ID" \
               --wait
-          xcrun stapler staple build/Peel.dmg
-      - name: Publish release
+          xcrun stapler staple "build/Peel-${{ steps.version.outputs.version }}.dmg"
+
+      - name: Build .app zip
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Peel.app "Peel-${{ steps.version.outputs.version }}.zip"
+
+      - name: Upload artifacts (workflow_dispatch and tag both keep these around)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Peel-${{ steps.version.outputs.version }}
+          path: |
+            build/Peel-${{ steps.version.outputs.version }}.dmg
+            build/Peel-${{ steps.version.outputs.version }}.zip
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/Peel.dmg
+          tag_name: ${{ github.ref_name }}
+          name: Peel ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            build/Peel-${{ steps.version.outputs.version }}.dmg
+            build/Peel-${{ steps.version.outputs.version }}.zip

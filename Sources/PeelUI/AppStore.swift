@@ -169,6 +169,56 @@ public final class PeelAppStore {
         await reloadApps()
     }
 
+    /// Re-hydrates the editor from a `HistoryRecord`: switches the
+    /// sidebar selection to that record's (app, endpoint), restores the
+    /// parameters into the form, and synthesizes a `DispatchResult` from
+    /// the stored response body so the user sees exactly what they saw
+    /// last time. No network call is made.
+    public func replay(_ record: Storage.HistoryRecord) async {
+        guard apps.contains(where: { $0.id == record.appConfigId }) else { return }
+        let selection = SidebarSelection(appId: record.appConfigId, endpoint: record.endpoint)
+        requestParameters[selection] = RequestParameters(values: record.parameters)
+
+        do {
+            let body = try await storage.loadResponseBody(for: record)
+            let spec = try EndpointBuilder.build(
+                endpoint: record.endpoint,
+                parameters: RequestParameters(values: record.parameters)
+            )
+            var request = URLRequest(url: spec.url(in: record.environment))
+            request.httpMethod = spec.method.rawValue
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            if let bodyData = spec.body {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = bodyData
+            }
+            let response = PeelAPI.Client.APIResponse(
+                request: request,
+                status: record.responseStatus,
+                body: body,
+                headers: [:],
+                durationMs: record.durationMs,
+                jwt: "",
+                diagnosis: AuthErrorMapper.diagnose(
+                    status: record.responseStatus,
+                    body: String(data: body, encoding: .utf8) ?? ""
+                )
+            )
+            let decoded: JSONValue
+            if let parsed = try? JSONValue(data: body) {
+                decoded = JWSDecoder().decodeTree(parsed)
+            } else {
+                decoded = .object([])
+            }
+            lastResults[selection] = DispatchResult(response: response, decoded: decoded)
+            lastErrors[selection] = nil
+        } catch {
+            PeelLog.persistence.error("Replay failed: \(error.localizedDescription, privacy: .public)")
+        }
+
+        select(appId: record.appConfigId, endpoint: record.endpoint)
+    }
+
     /// Drops a demo app into the sidebar so first-launch users can explore
     /// the workbench without real credentials. If the demo already exists
     /// we just focus it instead of inserting a duplicate.

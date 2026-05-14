@@ -85,15 +85,22 @@ struct InspectorView: View {
 
     @ViewBuilder
     private var recentSection: some View {
-        let recents = store.history
-            .filter { $0.endpoint == endpoint }
-            .prefix(5)
+        // Cross-endpoint recents — Xcode-style "Recent Files" / "Recents."
+        // Clicking a row replays it: parameters restored, response
+        // re-decoded, sidebar selection moved to that (app, endpoint).
+        let recents = store.history.prefix(10)
         InspectorSection(title: "Recent Calls") {
             if recents.isEmpty {
                 placeholder("No calls yet")
             } else {
                 ForEach(Array(recents), id: \.id) { record in
-                    InspectorRecentRow(record: record)
+                    Button {
+                        Task { await store.replay(record) }
+                    } label: {
+                        InspectorRecentRow(record: record, showingEndpoint: true)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -197,25 +204,43 @@ struct InspectorDiagnosis: View {
 
 struct InspectorRecentRow: View {
     let record: PeelPersistence.Storage.HistoryRecord
+    var showingEndpoint: Bool = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 5, height: 5)
-            Text("\(record.responseStatus)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(statusColor)
-            Text(record.sentAt, format: .relative(presentation: .numeric, unitsStyle: .narrow))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("\(record.durationMs) ms")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 5, height: 5)
+                Text("\(record.responseStatus)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(statusColor)
+                if showingEndpoint {
+                    Text(record.endpoint.displayName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text(record.sentAt, format: .relative(presentation: .numeric, unitsStyle: .narrow))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(record.durationMs) ms")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            if showingEndpoint {
+                Text(record.sentAt, format: .relative(presentation: .numeric, unitsStyle: .narrow))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 11)
+            }
         }
         .padding(.horizontal, 12)
-        .frame(minHeight: 20)
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
     }
 
     private var statusColor: Color {

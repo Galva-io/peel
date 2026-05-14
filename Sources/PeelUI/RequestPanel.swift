@@ -12,6 +12,7 @@ public struct RequestPanel: View {
     public let selection: SidebarSelection
     @State private var showingJWT = false
     @State private var sending = false
+    @State private var pendingConfirmation: EndpointConfirmation?
 
     public init(store: PeelAppStore, selection: SidebarSelection) {
         self.store = store
@@ -35,6 +36,18 @@ public struct RequestPanel: View {
         .background(.background)
         .onReceive(NotificationCenter.default.publisher(for: .peelSendRequest)) { _ in
             Task { await send() }
+        }
+        .sheet(item: $pendingConfirmation) { confirmation in
+            ConfirmationSheet(
+                confirmation: confirmation,
+                onConfirm: {
+                    pendingConfirmation = nil
+                    Task { await performSend() }
+                },
+                onCancel: {
+                    pendingConfirmation = nil
+                }
+            )
         }
     }
 
@@ -181,8 +194,26 @@ public struct RequestPanel: View {
         return true
     }
 
+    /// Entry point invoked from the Send button and the `peelSendRequest`
+    /// notification. For mutating endpoints we present a confirmation
+    /// sheet first; `performSend` is the actual dispatch path that runs
+    /// either immediately (read endpoints) or after the user confirms.
     private func send() async {
         guard canSend else { return }
+        if let app = store.activeApp,
+           let confirmation = EndpointConfirmationBuilder.describe(
+               endpoint: endpoint,
+               parameters: parameters.wrappedValue,
+               environment: store.environment,
+               appName: app.displayName
+           ) {
+            pendingConfirmation = confirmation
+            return
+        }
+        await performSend()
+    }
+
+    private func performSend() async {
         sending = true
         defer { sending = false }
         do {
@@ -245,6 +276,20 @@ struct ParameterControl: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .controlSize(.small)
+            case let .codedEnum(options):
+                Picker("", selection: $value) {
+                    if !options.contains(where: { $0.value == value }) {
+                        Text("—").tag("")
+                    }
+                    ForEach(options) { opt in
+                        Text(opt.label).tag(opt.value)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+            case .countryCodeTags:
+                CountryTagField(codesString: $value)
             case .bool:
                 Toggle("", isOn: Binding(
                     get: { value.lowercased() == "true" },

@@ -25,6 +25,26 @@ public struct ParameterField: Sendable, Identifiable, Hashable {
         case integer
         case enumeration(options: [String])
         case bool
+        /// An enum that ships a human label alongside its wire value.
+        /// Used for things like Apple's `extendReasonCode` where the API
+        /// expects `1` but users think "Customer Satisfaction."
+        case codedEnum(options: [CodedOption])
+        /// Multi-select tag picker for ISO 3166-1 alpha-2 storefront
+        /// codes. Stored as a comma-separated string in `RequestParameters`.
+        case countryCodeTags
+    }
+
+    /// One option in a `codedEnum`: a user-facing `label` and the actual
+    /// wire `value` that gets sent to Apple. Stored as a struct (not a
+    /// tuple) so `Kind` stays `Hashable`.
+    public struct CodedOption: Sendable, Hashable, Identifiable {
+        public let label: String
+        public let value: String
+        public var id: String { value }
+        public init(label: String, value: String) {
+            self.label = label
+            self.value = value
+        }
     }
 
     public let id: String
@@ -56,8 +76,10 @@ public struct ParameterField: Sendable, Identifiable, Hashable {
             return isRequired ? .invalid("\(label) is required") : .valid
         }
         switch kind {
-        case .text, .longText, .enumeration:
+        case .text, .longText, .enumeration, .countryCodeTags:
             return .valid
+        case let .codedEnum(options):
+            return options.contains(where: { $0.value == value }) ? .valid : .invalid("Invalid option")
         case .transactionId, .orderId, .integer:
             return value.allSatisfy(\.isNumber) ? .valid : .invalid("\(label) must be digits only")
         case .uuid:
@@ -126,24 +148,33 @@ public enum EndpointCatalog {
         case .requestRefund:
             return [
                 ParameterField(id: "transactionId", label: "Transaction ID", kind: .transactionId, isRequired: true),
-                ParameterField(id: "refundPreference", label: "Refund preference", kind: .integer, isRequired: true,
-                               placeholder: "0",
-                               help: "0 = undeclared, 1 = preferred, 2 = not preferred, 3 = no preference.")
+                ParameterField(id: "refundPreference", label: "Refund Preference",
+                               kind: .codedEnum(options: AppleEnumValues.refundPreference),
+                               isRequired: true,
+                               help: "Tells Apple which outcome you'd prefer for this refund.")
             ]
         case .extendSubscriptionRenewalDate:
             return [
-                ParameterField(id: "originalTransactionId", label: "Original transaction ID", kind: .transactionId, isRequired: true),
-                ParameterField(id: "extendByDays", label: "Extend by (days)", kind: .integer, isRequired: true,
+                ParameterField(id: "originalTransactionId", label: "Original Transaction ID", kind: .transactionId, isRequired: true),
+                ParameterField(id: "extendByDays", label: "Extend By (Days)", kind: .integer, isRequired: true,
                                placeholder: "30"),
-                ParameterField(id: "extendReasonCode", label: "Reason code", kind: .integer, isRequired: true,
-                               help: "0 = undeclared, 1 = customer satisfaction, 2 = other, 3 = service issue, 4 = other.")
+                ParameterField(id: "extendReasonCode", label: "Reason",
+                               kind: .codedEnum(options: AppleEnumValues.extendReason),
+                               isRequired: true,
+                               help: "Why you're extending the renewal date.")
             ]
         case .extendSubscriptionRenewalDateForAllActiveSubscribers:
             return [
                 ParameterField(id: "productId", label: "Product ID", kind: .text, isRequired: true),
-                ParameterField(id: "extendByDays", label: "Extend by (days)", kind: .integer, isRequired: true),
-                ParameterField(id: "extendReasonCode", label: "Reason code", kind: .integer, isRequired: true),
-                ParameterField(id: "storefrontCountryCodes", label: "Storefront country codes (comma-separated)", kind: .text, isRequired: false)
+                ParameterField(id: "extendByDays", label: "Extend By (Days)", kind: .integer, isRequired: true),
+                ParameterField(id: "extendReasonCode", label: "Reason",
+                               kind: .codedEnum(options: AppleEnumValues.extendReason),
+                               isRequired: true,
+                               help: "Why you're extending the renewal date."),
+                ParameterField(id: "storefrontCountryCodes", label: "Storefronts",
+                               kind: .countryCodeTags,
+                               isRequired: false,
+                               help: "Leave empty to target every storefront.")
             ]
         case .getStatusOfSubscriptionRenewalDateExtensions:
             return [
