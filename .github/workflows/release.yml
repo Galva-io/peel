@@ -1,0 +1,68 @@
+name: Release
+
+# Triggered by a semver tag push. The publish workflow signs, notarizes, and
+# uploads the DMG to a GitHub Release. Notarization/signing secrets must be
+# provisioned ahead of time:
+#
+#   APPLE_DEVELOPER_ID_CERT_BASE64
+#   APPLE_DEVELOPER_ID_CERT_PASSWORD
+#   APPLE_NOTARIZATION_USER
+#   APPLE_NOTARIZATION_PASSWORD
+#   APPLE_TEAM_ID
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Sign + notarize + upload
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Build release
+        run: swift build -c release
+      - name: Bundle
+        run: ./scripts/bundle.sh release
+      - name: Import signing certificate
+        env:
+          CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          echo "$CERT_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+      - name: Codesign
+        run: |
+          codesign --force --deep --options runtime \
+              --sign "Developer ID Application" \
+              --entitlements Resources/Peel.entitlements \
+              build/Peel.app
+      - name: Make DMG
+        run: |
+          hdiutil create -volname "Peel" -srcfolder build/Peel.app -ov -format UDZO build/Peel.dmg
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_USER }}
+          APP_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit build/Peel.dmg \
+              --apple-id "$APPLE_ID" \
+              --password "$APP_PASSWORD" \
+              --team-id "$TEAM_ID" \
+              --wait
+          xcrun stapler staple build/Peel.dmg
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Peel.dmg

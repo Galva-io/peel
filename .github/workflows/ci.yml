@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Build + test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Build
+        run: swift build -c debug
+      - name: Test
+        run: swift test --enable-code-coverage
+      - name: Bundle .app
+        run: ./scripts/bundle.sh debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Peel.app-debug
+          path: build/Peel.app
