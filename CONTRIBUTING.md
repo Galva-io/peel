@@ -7,13 +7,20 @@ Peel is open source and we want your help. The project is structured to make inc
 ```bash
 git clone https://github.com/galva/peel.git
 cd peel
-swift test          # 44 tests, takes < 5 s
-swift build         # produces .build/debug/Peel
-./scripts/bundle.sh debug   # produces build/Peel.app
-open build/Peel.app
+swift test                    # 44 tests, takes < 5 s
 ```
 
-You can also open `Package.swift` in Xcode — the package model works out of the box.
+For day-to-day development, generate the Xcode project with Tuist:
+
+```bash
+brew install tuist            # one-time
+tuist generate                # creates Peel.xcworkspace
+open Peel.xcworkspace         # ⌘R to run the .app
+```
+
+You can still build from the command line without Tuist — `swift build` produces the executable and `./scripts/bundle.sh debug` wraps it into a runnable `.app`. CI uses the SPM path so PRs don't need Tuist to ship.
+
+The two manifests stay in sync because they read the same `Sources/` and `Tests/` directories. When you add a new file under an existing module, neither manifest needs to change.
 
 ## How to add a new endpoint
 

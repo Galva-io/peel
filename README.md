@@ -42,19 +42,32 @@ Signed, notarized DMG from [Releases](https://github.com/galva/peel/releases).
 
 ### Build from source
 
-Requires Xcode 16+ on macOS 14 (Sonoma) or later.
+Requires Xcode 16+ on macOS 14 (Sonoma) or later. Optionally [Tuist](https://tuist.io) for a runnable Xcode project (recommended for development).
 
 ```bash
 git clone https://github.com/galva/peel.git
 cd peel
+
+# Option A — pure SPM. Fast, no extra tools. Produces a hand-bundled .app.
+swift test
 swift build -c release
 ./scripts/bundle.sh release        # produces build/Peel.app
 open build/Peel.app
+
+# Option B — Xcode via Tuist. Best for everyday development (⌘R to run).
+brew install tuist
+tuist generate                     # produces Peel.xcworkspace
+open Peel.xcworkspace
 ```
+
+Both paths read the same source files; pick whichever fits your workflow. CI uses Option A so contributors who don't have Tuist installed can still ship PRs.
 
 ## Project layout
 
 ```
+Package.swift        SPM manifest — canonical for `swift build` / `swift test`
+Project.swift        Tuist manifest — generates Peel.xcodeproj on demand
+Tuist.swift          Tuist top-level config
 Sources/
   PeelCore/          Models, JWT signer, Keychain, JWS decoder, diff, anonymizer
   PeelAPI/           Endpoint catalog, request builder, HTTP client
@@ -68,7 +81,7 @@ Tests/
   PeelPersistenceTests/
   PeelWebhookTests/
 scripts/
-  bundle.sh          Wraps the SPM executable into a .app bundle
+  bundle.sh          Wraps the SPM executable into a .app bundle (for CI / non-Tuist builds)
 Resources/
   Info.plist         App metadata
   Peel.entitlements  Sandbox + hardened-runtime entitlements

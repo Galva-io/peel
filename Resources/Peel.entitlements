@@ -16,14 +16,10 @@
     <key>com.apple.security.files.user-selected.read-only</key>
     <true/>
 
-    <!-- Keychain access. We do NOT request iCloud Keychain sync, which is the
-         default when this entitlement is absent. -->
-    <key>keychain-access-groups</key>
-    <array>
-        <string>$(AppIdentifierPrefix)io.galva.peel</string>
-    </array>
-
     <!-- Hardened runtime defaults. We do NOT enable any disable-library-validation
          or allow-unsigned-executable-memory entitlements. -->
+    <!-- Note: We deliberately do NOT request keychain-access-groups. Sandboxed
+         apps get their own keychain group based on the bundle id, which is
+         exactly the scope we want. -->
 </dict>
 </plist>

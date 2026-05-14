@@ -2,6 +2,8 @@
 
 Peel is built as a single Swift Package with six targets. AppKit hosts the chrome (windowing, menu, toolbar, services, drag-drop). SwiftUI hosts the content (forms, JSON viewers, diff panels). The boundary is `NSHostingController`.
 
+The same source layout drives **two** build manifests: `Package.swift` (SPM, used by CI and command-line workflows) and `Project.swift` (Tuist, used to generate a runnable Xcode project for development). Both point at the same `Sources/` and `Tests/` directories — no codegen, no duplication. When you add a new file under an existing module, neither manifest needs to change.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │  PeelApp  (executable)                                               │

@@ -1,0 +1,5 @@
+# Tool versions managed by mise (https://mise.jdx.dev).
+# Contributors who use mise (or asdf) get the right Tuist automatically; everyone
+# else can `brew install tuist` to match this version.
+[tools]
+tuist = "4.133.1"
