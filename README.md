@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/galva/peel/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/galva/peel?style=flat&label=download&color=blue"></a>
-  <a href="https://github.com/galva/peel/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/galva/peel/ci.yml?branch=main&style=flat&label=CI"></a>
+  <a href="https://github.com/Galva-io/peel/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Galva-io/peel?style=flat&label=download&color=blue"></a>
+  <a href="https://github.com/Galva-io/peel/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Galva-io/peel/ci.yml?branch=main&style=flat&label=CI"></a>
   <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-green.svg?style=flat"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black.svg?style=flat">
 </p>
@@ -38,11 +38,11 @@ Peel collapses the round trip into one keystroke: paste key, pick endpoint, send
 
 ### Download
 
-Grab the latest DMG from [**Releases**](https://github.com/galva/peel/releases/latest):
+Grab the latest DMG from [**Releases**](https://github.com/Galva-io/peel/releases/latest):
 
 ```bash
 # Or with the gh CLI
-gh release download --repo galva/peel --pattern '*.dmg'
+gh release download --repo Galva-io/peel --pattern '*.dmg'
 ```
 
 Releases are signed with Galva's Developer ID and notarized by Apple, so the DMG opens with a regular double-click — no quarantine warnings. Drag `Peel.app` into `Applications` and you're done.
@@ -52,7 +52,7 @@ Releases are signed with Galva's Developer ID and notarized by Apple, so the DMG
 Requires **macOS 14+**, **Xcode 26+** (Swift 6 language mode), and optionally **[Tuist 4](https://tuist.io)** if you want a real `.xcodeproj` to develop against. Without Tuist the SPM path still works for command-line builds.
 
 ```bash
-git clone https://github.com/galva/peel.git
+git clone https://github.com/Galva-io/peel.git
 cd peel
 
 # Option A — pure SPM
