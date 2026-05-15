@@ -12,7 +12,7 @@ Peel handles App Store Connect private keys, which are high-value secrets. The t
 
 | Threat | Mitigation |
 |---|---|
-| Key exfiltration | Keys stored in macOS Keychain with `AccessibleAfterFirstUnlockThisDeviceOnly`. Never written to disk in plaintext, never synced to iCloud. |
+| Key exfiltration | Keys stored in the macOS Data Protection keychain — bound to Peel's signed identity, `AccessibleAfterFirstUnlockThisDeviceOnly`, `Synchronizable = false`. Never written to disk in plaintext, never synced to iCloud, never accessible to another app. |
 | Accidental production action | Read-only mode is on by default. Production calls require explicit confirmation and a two-step flow for mutating actions. |
 | Network exfiltration | Hard-coded host allowlist (`api.storekit.itunes.apple.com`, `api.storekit-sandbox.itunes.apple.com`, plus Sparkle update host). Requests to any other host fail closed. |
 | Malicious update | Sparkle 2 EdDSA signature verification against Galva's signing key. Stable and beta channels are signature-separated. |
