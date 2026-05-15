@@ -43,6 +43,11 @@ struct AutocompleteField: NSViewRepresentable {
         combo.placeholderString = placeholder
     }
 
+    /// `NSComboBox` only ever calls its delegate on the main thread, but
+    /// `NSObject` subclasses aren't main-actor-isolated by default. We mark
+    /// the coordinator `@MainActor` explicitly so it can mutate the
+    /// `@Binding` parent (also main-actor) without Swift 6 complaining.
+    @MainActor
     final class Coordinator: NSObject, NSComboBoxDelegate {
         var parent: AutocompleteField
         init(_ parent: AutocompleteField) { self.parent = parent }

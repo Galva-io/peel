@@ -19,12 +19,7 @@ final class PeelAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
-        Task {
-            await store.bootstrap()
-            if UserDefaults.standard.bool(forKey: "io.galva.peel.webhookAutoStart") {
-                await store.startWebhookListener()
-            }
-        }
+        Task { await store.bootstrap() }
         openMainWindow()
         menuBarController = MenuBarController(store: store)
         menuBarController?.refresh()

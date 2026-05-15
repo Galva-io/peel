@@ -2,6 +2,10 @@
 
 This page is for maintainers. End users should grab the latest build from [Releases](https://github.com/galva/peel/releases/latest); contributors can find development artifacts on the [CI run summary](https://github.com/galva/peel/actions/workflows/ci.yml).
 
+## Toolchain
+
+The CI and Release workflows pin to **macOS 26 (Tahoe)** + **Xcode 26** because `Package.swift` opts every target into Swift 6 language mode (`.swiftLanguageMode(.v6)`). Older Xcodes won't accept `.swiftLanguageMode` and won't compile the `@MainActor` annotations in `PeelUI`. The runner image GitHub Actions uses is `macos-26`; the Xcode selector picks the highest-numbered `/Applications/Xcode_26*` it finds.
+
 ## Release flavors
 
 | Flavor | Trigger | Signed | Notarized | DMG | Artifact retention |

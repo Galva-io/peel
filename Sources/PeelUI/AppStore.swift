@@ -4,7 +4,6 @@ import Observation
 import PeelCore
 import PeelAPI
 import PeelPersistence
-import PeelWebhook
 
 /// Top-level observable state. One instance per process, injected into every
 /// window via `@Environment`. Sub-stores own their own scopes so this stays
@@ -18,8 +17,6 @@ public final class PeelAppStore {
     public var auditTrail: [AuditEntry] = []
     public var history: [Storage.HistoryRecord] = []
     public var lastAction: Date?
-    public var listenerState: LocalListener.State = .stopped
-    public var receivedNotifications: [LocalListener.ReceivedNotification] = []
 
     /// Sidebar selection is the canonical (app, endpoint) tuple. The active
     /// app and active endpoint are derived from it; every other view binds
@@ -42,20 +39,17 @@ public final class PeelAppStore {
     public let storage: Storage
     public let keychain: KeychainStore
     public let client: PeelAPI.Client
-    public let webhookListener: LocalListener
     public let appStoreLookup: AppStoreLookup
 
     public init(
         storage: Storage,
         keychain: KeychainStore = KeychainStore(),
         client: PeelAPI.Client? = nil,
-        listener: LocalListener = LocalListener(),
         appStoreLookup: AppStoreLookup = AppStoreLookup()
     ) {
         self.storage = storage
         self.keychain = keychain
         self.client = client ?? PeelAPI.Client(keyFetcher: KeychainKeyFetcher(store: keychain))
-        self.webhookListener = listener
         self.appStoreLookup = appStoreLookup
     }
 
@@ -67,12 +61,6 @@ public final class PeelAppStore {
         if sidebarSelection == nil, let first = apps.first {
             sidebarSelection = SidebarSelection(appId: first.id, endpoint: .getAllSubscriptionStatuses)
             expandedAppIds.insert(first.id)
-        }
-        let listener = webhookListener
-        _ = await listener.addHandler { [weak self] notification in
-            Task { @MainActor in
-                self?.receivedNotifications.insert(notification, at: 0)
-            }
         }
     }
 
@@ -438,19 +426,6 @@ public final class PeelAppStore {
         return ordered
     }
 
-    public func startWebhookListener() async {
-        do {
-            try await webhookListener.start()
-            listenerState = await webhookListener.state
-        } catch {
-            listenerState = .failed(message: error.localizedDescription)
-        }
-    }
-
-    public func stopWebhookListener() async {
-        await webhookListener.stop()
-        listenerState = await webhookListener.state
-    }
 }
 
 /// Sidebar selection identifies the (app, endpoint) tuple currently shown in

@@ -60,6 +60,11 @@ public struct DecodedWebView: NSViewRepresentable {
         init(view: WKWebView) { self.view = view }
     }
 
+    /// Marked `@MainActor` so the delegate signature exactly matches the
+    /// `WKNavigationDelegate` protocol's main-actor isolation under
+    /// Swift 6 — `WKWebView` always dispatches its callbacks on the
+    /// main actor.
+    @MainActor
     public final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var lastRendered: RenderKey?
 
@@ -68,7 +73,7 @@ public struct DecodedWebView: NSViewRepresentable {
         /// failing earlier avoids a flicker.
         public func webView(_ webView: WKWebView,
                             decidePolicyFor action: WKNavigationAction,
-                            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                            decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
             if action.navigationType == .linkActivated, let url = action.request.url {
                 NSWorkspace.shared.open(url)
                 decisionHandler(.cancel)

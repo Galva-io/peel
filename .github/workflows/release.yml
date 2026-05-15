@@ -26,11 +26,23 @@ permissions:
 jobs:
   build:
     name: Build, sign, package
-    runs-on: macos-14
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_15.4.app
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Prefer Xcode 26 (Swift 6.3); otherwise take the latest Xcode 16
+          # available on the runner — Peel only needs Swift 6.0 language
+          # mode which any Xcode 16+ provides.
+          candidates=$(ls -d /Applications/Xcode_26* /Applications/Xcode_16* 2>/dev/null | sort -V | tail -n 1)
+          if [[ -z "$candidates" ]]; then
+            candidates="/Applications/Xcode.app"
+          fi
+          echo "Using $candidates"
+          sudo xcode-select -s "$candidates/Contents/Developer"
+          echo "DEVELOPER_DIR=$candidates/Contents/Developer" >> "$GITHUB_ENV"
+          swift --version
 
       - name: Resolve version
         id: version

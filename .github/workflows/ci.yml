@@ -1,9 +1,12 @@
 name: CI
 
-# Build + test on every push to `main` and every PR. The job also packages
-# a development `.app` and uploads it as a workflow artifact, so any
-# contributor can grab a current build from the run summary page without
-# cutting a release tag.
+# Build + test on every push to `main` and every PR. Uses `macos-latest`
+# so GitHub picks the freshest stable runner image automatically; the
+# Xcode selector then prefers Xcode 26 and falls back to the highest
+# Xcode that's actually installed on the image. The job packages a
+# development `.app` and uploads it as a workflow artifact so any
+# contributor can grab a current build from the run summary page
+# without cutting a release tag.
 
 on:
   push:
@@ -14,11 +17,23 @@ on:
 jobs:
   test:
     name: Build · test · package
-    runs-on: macos-14
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_15.4.app
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Prefer Xcode 26 (Swift 6.3); otherwise take whichever Xcode is
+          # latest on the runner image — Peel's Package.swift only needs
+          # Swift 6.0 language mode, which any Xcode 16+ provides.
+          candidates=$(ls -d /Applications/Xcode_26* /Applications/Xcode_16* 2>/dev/null | sort -V | tail -n 1)
+          if [[ -z "$candidates" ]]; then
+            candidates="/Applications/Xcode.app"
+          fi
+          echo "Using $candidates"
+          sudo xcode-select -s "$candidates/Contents/Developer"
+          echo "DEVELOPER_DIR=$candidates/Contents/Developer" >> "$GITHUB_ENV"
+          swift --version
 
       - name: Cache SPM dependencies
         uses: actions/cache@v4
@@ -38,7 +53,7 @@ jobs:
       - name: Bundle .app
         run: ./scripts/bundle.sh debug
 
-      - name: Zip .app (CI artifacts can't preserve symlinks reliably)
+      - name: Zip .app (ditto preserves resource forks; zip drops them)
         run: |
           cd build
           ditto -c -k --sequesterRsrc --keepParent Peel.app Peel-dev.zip

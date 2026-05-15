@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/galva/peel/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/galva/peel?style=flat&label=download&color=blue"></a>
-  <a href="https://github.com/galva/peel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/galva/peel/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/galva/peel/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/galva/peel/ci.yml?branch=main&style=flat&label=CI"></a>
   <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-green.svg?style=flat"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black.svg?style=flat">
 </p>
@@ -30,47 +30,33 @@ Peel collapses the round trip into one keystroke: paste key, pick endpoint, send
 - **App Store metadata fetch.** Paste an App Store URL or bundle id; Peel auto-fills display name, bundle id, and icon via Apple's iTunes Lookup API.
 - **Automatic pagination.** `getNotificationHistory` exposes a "how many to fetch" field — Peel walks Apple's `paginationToken` chain and merges the batches into one response.
 - **Smart input controls.** Date pickers for time windows, dropdowns for `refundPreference` / `extendReasonCode`, searchable tag picker for storefront country codes, autocomplete on transaction-id fields backed by your call history.
-- **Local webhook receiver.** `sendTestNotification` → arrives on `127.0.0.1` → decoded in the same UI as any API response.
 - **Compare mode.** Diff two responses with a semantic summary card ("subscription extended by 30 days").
 - **Replayable history.** Recent calls across all endpoints in the Inspector — click any row to re-hydrate the request form and response viewer with no network call.
 - **App-sandboxed, Keychain-only secrets, hard-coded network allowlist.** Nothing leaves your machine except calls to Apple.
 
 ## Install
 
-### Download a release
+### Download
 
-The fastest path: grab the latest signed DMG from [**Releases**](https://github.com/galva/peel/releases/latest).
+Grab the latest DMG from [**Releases**](https://github.com/galva/peel/releases/latest):
 
 ```bash
 # Or with the gh CLI
 gh release download --repo galva/peel --pattern '*.dmg'
 ```
 
-Open the DMG and drag `Peel.app` into `Applications`.
-
-For unsigned development builds (open-source CI artifacts), macOS may flag the app on first launch. Right-click → Open once, or run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Peel.app
-```
-
-### Homebrew
-
-```bash
-# Coming soon — track https://github.com/galva/peel/issues for status
-brew install --cask peel
-```
+Releases are signed with Galva's Developer ID and notarized by Apple, so the DMG opens with a regular double-click — no quarantine warnings. Drag `Peel.app` into `Applications` and you're done.
 
 ### Build from source
 
-Requires **macOS 14+**, **Xcode 16+**, and optionally **[Tuist 4](https://tuist.io)** if you want a real `.xcodeproj` to develop against. Without Tuist the SPM path still works for command-line builds.
+Requires **macOS 14+**, **Xcode 26+** (Swift 6 language mode), and optionally **[Tuist 4](https://tuist.io)** if you want a real `.xcodeproj` to develop against. Without Tuist the SPM path still works for command-line builds.
 
 ```bash
 git clone https://github.com/galva/peel.git
 cd peel
 
 # Option A — pure SPM
-swift test                     # 79 tests, < 1 s
+swift test                     # < 1 s
 ./scripts/bundle.sh release    # produces build/Peel.app
 open build/Peel.app
 
@@ -107,7 +93,6 @@ Sources/
   PeelAPI/             Endpoint catalog, request builder, HTTP client, confirmation
                        descriptors, notification-type and reason-code tables
   PeelPersistence/     SwiftData entities, history, audit log, file blobs
-  PeelWebhook/         Local NWListener HTTP receiver bound to 127.0.0.1 only
   PeelUI/              SwiftUI views — sidebar, request panel, response viewer,
                        inspector, status bar, sheets
   PeelApp/             AppKit shell — AppDelegate, main menu, window controllers

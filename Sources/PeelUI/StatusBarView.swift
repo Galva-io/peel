@@ -3,8 +3,8 @@ import PeelCore
 
 /// Thin status strip at the bottom of every main window — Xcode's bottom
 /// bar (the one that shows "Build Succeeded" + warning/error counts and
-/// branch state). Ours surfaces environment, read-only state, webhook
-/// listener state, and a passive last-action timestamp.
+/// branch state). Ours surfaces environment, read-only state, a request
+/// count, and a passive last-action timestamp.
 struct StatusBarView: View {
     @Bindable var store: PeelAppStore
 
@@ -12,7 +12,6 @@ struct StatusBarView: View {
         HStack(spacing: 14) {
             environmentChip
             readOnlyChip
-            listenerChip
             Spacer()
             historyChip
             lastActionChip
@@ -44,33 +43,6 @@ struct StatusBarView: View {
                 .foregroundStyle(store.isReadOnly ? .secondary : PeelTheme.productionTint)
             Text(store.isReadOnly ? "Read-only" : "Mutating allowed")
                 .foregroundStyle(store.isReadOnly ? .secondary : PeelTheme.productionTint)
-        }
-    }
-
-    @ViewBuilder
-    private var listenerChip: some View {
-        switch store.listenerState {
-        case .stopped:
-            EmptyView()
-        case .starting:
-            HStack(spacing: 4) {
-                ProgressView().controlSize(.small)
-                Text("Listener starting…").foregroundStyle(.secondary)
-            }
-        case let .running(port):
-            HStack(spacing: 4) {
-                Circle().fill(Color.green).frame(width: 6, height: 6)
-                Text("Webhook :\(port)").foregroundStyle(.secondary)
-            }
-        case let .failed(message):
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.octagon.fill")
-                    .imageScale(.small)
-                    .foregroundStyle(PeelTheme.productionTint)
-                Text(message)
-                    .foregroundStyle(PeelTheme.productionTint)
-                    .lineLimit(1)
-            }
         }
     }
 

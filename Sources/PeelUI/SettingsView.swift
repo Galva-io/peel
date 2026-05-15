@@ -11,8 +11,6 @@ import PeelCore
 public struct SettingsView: View {
     @Bindable public var store: PeelAppStore
     @AppStorage("io.galva.peel.menuBarIconMode") private var menuBarIconMode: String = "always"
-    @AppStorage("io.galva.peel.webhookPort") private var webhookPort: Int = 9876
-    @AppStorage("io.galva.peel.webhookAutoStart") private var webhookAutoStart: Bool = false
     @AppStorage("io.galva.peel.historyRetentionDays") private var historyRetentionDays: Int = 30
     @AppStorage("io.galva.peel.telemetryEnabled") private var telemetryEnabled: Bool = false
     @AppStorage("io.galva.peel.theme") private var theme: String = "system"
@@ -26,7 +24,6 @@ public struct SettingsView: View {
         TabView {
             general.tabItem { Label("General", systemImage: "gear") }
             apps.tabItem { Label("Apps", systemImage: "square.stack.3d.up") }
-            webhooks.tabItem { Label("Webhooks", systemImage: "antenna.radiowaves.left.and.right") }
             privacy.tabItem { Label("Privacy", systemImage: "hand.raised") }
             updates.tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
             about.tabItem { Label("About", systemImage: "info.circle") }
@@ -111,46 +108,6 @@ public struct SettingsView: View {
         .padding(20)
     }
 
-    // MARK: - Webhooks
-
-    private var webhooks: some View {
-        Form {
-            Section {
-                Stepper("Listener port: \(webhookPort)", value: $webhookPort, in: 1024...65535)
-                Toggle("Start listener at app launch", isOn: $webhookAutoStart)
-                HStack {
-                    listenerStatusLabel
-                    Spacer()
-                    Button("Start") { Task { await store.startWebhookListener() } }
-                        .disabled(isListenerRunning)
-                    Button("Stop") { Task { await store.stopWebhookListener() } }
-                        .disabled(!isListenerRunning)
-                }
-            } footer: {
-                Text("Receiver is bound to 127.0.0.1 only — never reachable from another machine.")
-            }
-        }
-        .formStyle(.grouped)
-        .padding(.top, 4)
-    }
-
-    private var listenerStatusLabel: some View {
-        Group {
-            switch store.listenerState {
-            case .stopped: Label("Stopped", systemImage: "stop.circle").foregroundStyle(.secondary)
-            case .starting: Label("Starting…", systemImage: "circle.dotted")
-            case let .running(port): Label("Listening on \(port)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-            case let .failed(msg): Label(msg, systemImage: "exclamationmark.octagon.fill").foregroundStyle(PeelTheme.productionTint)
-            }
-        }
-        .font(.callout)
-    }
-
-    private var isListenerRunning: Bool {
-        if case .running = store.listenerState { return true }
-        return false
-    }
-
     // MARK: - Privacy
 
     private var privacy: some View {
@@ -229,6 +186,10 @@ public struct SettingsView: View {
         .padding(20)
     }
 
+    /// `NSSavePanel` is `@MainActor`-isolated in Swift 6, so the whole
+    /// function lives on the main actor — the storage hop already uses
+    /// `await`, no extra Task hopping needed.
+    @MainActor
     private func exportAudit() async {
         let jsonl = (try? await store.storage.exportAuditJSONL()) ?? ""
         let panel = NSSavePanel()

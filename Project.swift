@@ -1,7 +1,7 @@
 import ProjectDescription
 
-// Tuist project manifest. Mirrors Package.swift: six modules + one executable
-// + four test targets. Generates a runnable Xcode project from the same
+// Tuist project manifest. Mirrors Package.swift: five modules + one executable
+// + three test targets. Generates a runnable Xcode project from the same
 // `Sources/` and `Tests/` directories SPM uses.
 //
 // Why both?
@@ -64,14 +64,12 @@ func unitTests(name: String, depends: [String]) -> Target {
 let peelCore = framework(name: "PeelCore")
 let peelAPI = framework(name: "PeelAPI", dependencies: [.target(name: "PeelCore")])
 let peelPersistence = framework(name: "PeelPersistence", dependencies: [.target(name: "PeelCore")])
-let peelWebhook = framework(name: "PeelWebhook", dependencies: [.target(name: "PeelCore")])
 let peelUI = framework(
     name: "PeelUI",
     dependencies: [
         .target(name: "PeelCore"),
         .target(name: "PeelAPI"),
-        .target(name: "PeelPersistence"),
-        .target(name: "PeelWebhook")
+        .target(name: "PeelPersistence")
     ]
 )
 
@@ -90,7 +88,6 @@ let peelApp = Target.target(
         .target(name: "PeelCore"),
         .target(name: "PeelAPI"),
         .target(name: "PeelPersistence"),
-        .target(name: "PeelWebhook"),
         .target(name: "PeelUI")
     ],
     settings: .settings(base: baseSettings)
@@ -99,8 +96,7 @@ let peelApp = Target.target(
 let tests: [Target] = [
     unitTests(name: "PeelCoreTests", depends: ["PeelCore"]),
     unitTests(name: "PeelAPITests", depends: ["PeelAPI", "PeelCore"]),
-    unitTests(name: "PeelPersistenceTests", depends: ["PeelPersistence", "PeelCore"]),
-    unitTests(name: "PeelWebhookTests", depends: ["PeelWebhook", "PeelCore"])
+    unitTests(name: "PeelPersistenceTests", depends: ["PeelPersistence", "PeelCore"])
 ]
 
 let project = Project(
@@ -122,7 +118,6 @@ let project = Project(
         peelCore,
         peelAPI,
         peelPersistence,
-        peelWebhook,
         peelUI
     ] + tests,
     schemes: [
