@@ -37,16 +37,40 @@ public final class KeychainStore: @unchecked Sendable {
         self.accessibility = accessibility
     }
 
-    /// Shared attribute set applied to every query. Centralized so that
-    /// "use the data protection keychain" can't accidentally be omitted
-    /// from one of the call sites.
+    /// Whether the running binary holds the `keychain-access-groups`
+    /// entitlement required to talk to the Data Protection keychain.
+    /// Probed once on first use and cached. Notarized release builds
+    /// always set this; ad-hoc local builds (via `bundle.sh`) don't,
+    /// and silently fall back to the user's login keychain so that
+    /// contributor workflows still function.
+    private static let dataProtectionAvailable: Bool = {
+        let probeQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "__peel.probe.\(UUID().uuidString)",
+            kSecUseDataProtectionKeychain as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        let status = SecItemCopyMatching(probeQuery as CFDictionary, nil)
+        // errSecMissingEntitlement = -34018; surfaced when the running
+        // binary lacks `keychain-access-groups`. Anything else (success,
+        // not found, etc.) means the call reached the Data Protection
+        // backend successfully.
+        return status != -34018
+    }()
+
+    /// Shared attribute set applied to every query. Centralized so the
+    /// "use the data protection keychain" flag can't accidentally be
+    /// omitted from one of the call sites.
     private func baseAttributes(account: String) -> [String: Any] {
-        [
+        var attrs: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecUseDataProtectionKeychain as String: true
+            kSecAttrAccount as String: account
         ]
+        if Self.dataProtectionAvailable {
+            attrs[kSecUseDataProtectionKeychain as String] = true
+        }
+        return attrs
     }
 
     public func store(pem: String, account: String) throws {
@@ -101,11 +125,13 @@ public final class KeychainStore: @unchecked Sendable {
 
     /// Used by Settings → Privacy → Reset Keychain access.
     public func purgeAll() throws {
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecUseDataProtectionKeychain as String: true
+            kSecAttrService as String: service
         ]
+        if Self.dataProtectionAvailable {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw PeelError.keychain("Keychain purge failed (OSStatus \(status))")

@@ -77,9 +77,20 @@ if [[ -d "$ASSETS_DIR" ]]; then
 fi
 
 # Ad-hoc local sign so the app can launch on the developer's machine.
+# `codesign --sign -` cannot resolve $(AppIdentifierPrefix), so we strip
+# `keychain-access-groups` from a *copy* of the entitlements before
+# signing. The release workflow signs with a real Developer ID and uses
+# the entitlements file unmodified, so the data-protection keychain is
+# fully enabled in shipped builds.
 echo "→ Ad-hoc codesigning…"
-codesign --force --deep --sign - \
-    --entitlements "$ROOT/Resources/Peel.entitlements" \
-    "$APP"
+TEMP_ENT="$(mktemp).plist"
+cp "$ROOT/Resources/Peel.entitlements" "$TEMP_ENT"
+/usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$TEMP_ENT" >/dev/null 2>&1 || true
 
-echo "✓ Built $APP"
+codesign --force --deep --sign - \
+    --entitlements "$TEMP_ENT" \
+    "${APP}"
+
+rm -f "$TEMP_ENT"
+
+echo "✓ Built ${APP}"

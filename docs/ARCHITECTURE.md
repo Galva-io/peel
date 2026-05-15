@@ -62,14 +62,19 @@ SwiftData for structured records (apps, history index, audit log). Plain files f
 
 ## Secrets
 
-The `.p8` private key for each app sits in the Keychain only, keyed by the `AppConfig.id` UUID:
+The `.p8` private key for each app sits in the macOS **Data Protection keychain** only, keyed by the `AppConfig.id` UUID:
 
 ```
-service: io.galva.peel
-account: <uuid>.p8
-data:    <PEM contents>
-attrs:   AccessibleAfterFirstUnlockThisDeviceOnly · Synchronizable = false
+service:    io.galva.peel
+account:    <uuid>.p8
+data:       <PEM contents>
+attrs:      kSecUseDataProtectionKeychain = true
+            AccessibleAfterFirstUnlockThisDeviceOnly
+            Synchronizable = false
+access-group: $(AppIdentifierPrefix)io.galva.peel
 ```
+
+The Data Protection keychain is the iOS-style backend that ships on macOS 10.15+. The `keychain-access-groups` entitlement opts our sandboxed app into it — items are bound to Peel's signed identity (Team ID + bundle id) rather than to the user's login keychain, so macOS reads and writes silently with no password prompts. The side effect is that switching signing identities (ad-hoc dev build ↔ Developer-ID-signed release) makes prior items invisible; for a shipped, stably signed release that's exactly the scope we want.
 
 The Storage layer never sees the key. Only `PeelAPI.Client` reads it, on the JWT-signing path.
 
