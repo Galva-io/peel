@@ -1,16 +1,32 @@
 import Foundation
 import Security
 
-/// Stores `.p8` private keys in the macOS Keychain. The service identifier is
-/// fixed and the account is the per-app UUID, so keys are scoped per
-/// `AppConfig` and one app's compromised state never leaks to another.
+/// Stores `.p8` private keys in the macOS Keychain.
+///
+/// All `SecItem*` calls pass `kSecUseDataProtectionKeychain = true`, which
+/// routes operations into the iOS-style **Data Protection keychain** rather
+/// than the user's login keychain. This has two practical consequences:
+///
+///   • The OS never prompts the user for access. Items are bound to the
+///     app's signing identity (Team ID + bundle id, both declared in the
+///     `keychain-access-groups` entitlement) and the system permits the
+///     signed Peel binary to read its own items silently.
+///   • If the signing identity changes — e.g. a developer running an
+///     ad-hoc-signed local build instead of the Developer-ID-signed
+///     release — those items become invisible. The right tradeoff for a
+///     shipped app where stable signing is the norm; contributors running
+///     ad-hoc builds will simply have to re-import a `.p8`.
+///
+/// The service identifier is fixed (`io.galva.peel`) and each item's
+/// account is the `AppConfig.id` UUID, so keys remain scoped per app.
 public final class KeychainStore: @unchecked Sendable {
     public static let defaultService = "io.galva.peel"
 
     private let service: String
-    /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` keeps secrets local,
-    /// not synced via iCloud Keychain, and accessible to background processes
-    /// once the device has been unlocked since boot.
+    /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` keeps secrets
+    /// local (no iCloud sync) and accessible to the app once the device
+    /// has been unlocked since boot — the gentlest accessibility level
+    /// that still survives reboots.
     private let accessibility: CFString
 
     public init(
@@ -21,6 +37,18 @@ public final class KeychainStore: @unchecked Sendable {
         self.accessibility = accessibility
     }
 
+    /// Shared attribute set applied to every query. Centralized so that
+    /// "use the data protection keychain" can't accidentally be omitted
+    /// from one of the call sites.
+    private func baseAttributes(account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true
+        ]
+    }
+
     public func store(pem: String, account: String) throws {
         guard let data = pem.data(using: .utf8) else {
             throw PeelError.keychain("Could not encode key as UTF-8")
@@ -28,14 +56,11 @@ public final class KeychainStore: @unchecked Sendable {
         // Delete first; SecItemUpdate has subtle attribute-matching gotchas.
         try? delete(account: account)
 
-        let attributes: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: accessibility,
-            kSecAttrSynchronizable as String: false,
-            kSecValueData as String: data
-        ]
+        var attributes = baseAttributes(account: account)
+        attributes[kSecAttrAccessible as String] = accessibility
+        attributes[kSecAttrSynchronizable as String] = false
+        attributes[kSecValueData as String] = data
+
         let status = SecItemAdd(attributes as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw PeelError.keychain("Keychain save failed (OSStatus \(status))")
@@ -43,13 +68,10 @@ public final class KeychainStore: @unchecked Sendable {
     }
 
     public func fetch(account: String) throws -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true
-        ]
+        var query = baseAttributes(account: account)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess else {
@@ -62,11 +84,7 @@ public final class KeychainStore: @unchecked Sendable {
     }
 
     public func delete(account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
+        let query = baseAttributes(account: account)
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw PeelError.keychain("Keychain delete failed (OSStatus \(status))")
@@ -74,21 +92,19 @@ public final class KeychainStore: @unchecked Sendable {
     }
 
     public func contains(account: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+        var query = baseAttributes(account: account)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
         let status = SecItemCopyMatching(query as CFDictionary, nil)
         return status == errSecSuccess
     }
 
-    /// Used by Settings → Security → Reset Keychain access.
+    /// Used by Settings → Privacy → Reset Keychain access.
     public func purgeAll() throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service
+            kSecAttrService as String: service,
+            kSecUseDataProtectionKeychain as String: true
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {

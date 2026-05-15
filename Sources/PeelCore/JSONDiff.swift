@@ -133,8 +133,10 @@ struct SemanticDiffFormatter {
                         return "Status \(a) → \(b)"
                     }
                 case "autoRenewStatus":
-                    if let a = from.numberValue?.intValue, let b = to.numberValue?.intValue {
-                        return a == 1 ? "Auto-renew turned off" : "Auto-renew turned on"
+                    // The new value is what matters here: the message
+                    // reads "turned off" when the prior state was on.
+                    if let prior = from.numberValue?.intValue, to.numberValue?.intValue != nil {
+                        return prior == 1 ? "Auto-renew turned off" : "Auto-renew turned on"
                     }
                 default: break
                 }

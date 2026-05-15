@@ -1,6 +1,6 @@
 # Architecture
 
-Peel is built as a single Swift Package with six targets. AppKit hosts the chrome (windowing, menu, toolbar, services, drag-drop). SwiftUI hosts the content (forms, JSON viewers, diff panels). The boundary is `NSHostingController`.
+Peel is built as a single Swift Package with five targets. AppKit hosts the chrome (windowing, menu, toolbar, services, drag-drop). SwiftUI hosts the content (forms, JSON viewers, diff panels). The boundary is `NSHostingController`.
 
 The same source layout drives **two** build manifests: `Package.swift` (SPM, used by CI and command-line workflows) and `Project.swift` (Tuist, used to generate a runnable Xcode project for development). Both point at the same `Sources/` and `Tests/` directories — no codegen, no duplication. When you add a new file under an existing module, neither manifest needs to change.
 
@@ -23,16 +23,17 @@ The same source layout drives **two** build manifests: `Package.swift` (SPM, use
             │
             ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  PeelAPI       PeelPersistence       PeelWebhook                     │
-│  Client        Storage (SwiftData)   LocalListener (NWListener)      │
-│  Endpoint…     History · Audit       HTTPParser                      │
+│  PeelAPI                          PeelPersistence                    │
+│  Client · EndpointSpec ·          Storage (SwiftData) ·              │
+│  Confirmation builder             History · Audit · blobs            │
 └──────────────────────────────────────────────────────────────────────┘
-            │              │
-            ▼              ▼
+            │                              │
+            ▼                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │  PeelCore                                                            │
 │  Models · JWTSigner · KeychainStore · JWSDecoder · JSONValue ·       │
-│  JSONDiff · Anonymizer · AuthErrorMapper · AuditLog · Allowlist      │
+│  JSONDiff · Anonymizer · AuthErrorMapper · CountryCatalog ·          │
+│  AppStoreLookup · AuditLog · Allowlist · ExampleAppFactory           │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,9 +50,9 @@ The mix is contained: each main window is one `NSWindowController` hosting one S
 - The configured apps list.
 - The active app and environment.
 - The audit log and history caches.
-- The webhook listener and incoming notifications.
+- Per-selection caches: parameters typed in the form, last result, last error.
 
-`PeelAPI.Client`, `PeelPersistence.Storage`, and `PeelWebhook.LocalListener` are actors. The store talks to them with `await`. UI views observe the store directly via `@Bindable`.
+`PeelAPI.Client` and `PeelPersistence.Storage` are actors. The store talks to them with `await`. UI views observe the store directly via `@Bindable`.
 
 This is intentionally simple — no Redux, no Combine plumbing, no view-models layered on top of view-models. Three layers: store → views, store → actors. Done.
 
@@ -83,12 +84,6 @@ The Storage layer never sees the key. Only `PeelAPI.Client` reads it, on the JWT
 Every request goes through `dispatch(DispatchInput)`. The input carries the app context, environment, prepared `EndpointSpec`, and the read-only flag. The client signs the JWT (or pulls a cached one), constructs the `URLRequest`, sends it, and returns a typed `APIResponse` with the raw body, headers, decoded diagnosis, and timing.
 
 Tests inject a `Transport` stub. The real implementation is `URLSessionTransport`.
-
-## Webhook receiver
-
-`PeelWebhook.LocalListener` is an `NWListener`-backed actor. It binds to `127.0.0.1:<port>` with `acceptLocalOnly = true`. It hand-parses HTTP because the receiver only needs to accept `POST` with a JSON body — SwiftNIO would be overkill for one route.
-
-Each received notification is broadcast to registered handlers. The UI registers a handler at app bootstrap that prepends notifications to `PeelAppStore.receivedNotifications`, which the menu bar popover and the receiver-specific view subscribe to.
 
 ## JWS decoding
 
@@ -131,7 +126,7 @@ Targets enforced by manual review (we don't yet have automated perf tests in CI)
 
 ## Testing
 
-- Unit tests for every Core, API, Persistence, and Webhook module.
+- Unit tests for every Core, API, and Persistence module.
 - SwiftData uses `isStoredInMemoryOnly` so tests don't touch disk.
 - The Client uses a `Transport` protocol so tests don't hit the network.
 - UI snapshot / XCUITest coverage is a planned addition.

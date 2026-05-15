@@ -38,7 +38,7 @@ if [[ ! -x "$EXEC" ]]; then
     exit 1
 fi
 
-echo "→ Assembling $APP…"
+echo "→ Assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"

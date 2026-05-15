@@ -16,10 +16,21 @@
     <key>com.apple.security.files.user-selected.read-only</key>
     <true/>
 
-    <!-- Hardened runtime defaults. We do NOT enable any disable-library-validation
-         or allow-unsigned-executable-memory entitlements. -->
-    <!-- Note: We deliberately do NOT request keychain-access-groups. Sandboxed
-         apps get their own keychain group based on the bundle id, which is
-         exactly the scope we want. -->
+    <!-- Hardened runtime defaults. We do NOT enable any
+         disable-library-validation or allow-unsigned-executable-memory
+         entitlements. -->
+
+    <!-- Opt the sandboxed app into the Data Protection keychain. The single
+         entry here exists not to share items with other apps — Peel ships
+         alone — but because macOS requires `keychain-access-groups` to be
+         declared before `kSecUseDataProtectionKeychain = true` queries are
+         accepted. With this in place, KeychainStore stops touching the
+         user's login keychain entirely; items live in the iOS-style
+         data-protection keychain, bound to the app's signed identity, and
+         macOS never prompts the user for access. -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)io.galva.peel</string>
+    </array>
 </dict>
 </plist>
