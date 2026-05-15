@@ -74,7 +74,7 @@ Peel is local-only and the source is open so you can verify it.
 
 | Threat | Mitigation |
 |---|---|
-| Key exfiltration | `.p8` keys stored in the macOS Data Protection keychain (iOS-style, bound to Peel's signed identity), `AccessibleAfterFirstUnlockThisDeviceOnly`, `Synchronizable = false`. Never written to disk in plaintext. |
+| Key exfiltration | `.p8` keys stored in the macOS Keychain (`AccessibleAfterFirstUnlockThisDeviceOnly`, `Synchronizable = false`). Never written to disk in plaintext, never synced to iCloud. |
 | Accidental production action | Read-only on by default. Toggling it off in Production triggers a confirmation. Mutating endpoints surface a pre-dispatch sheet showing exact wire values. |
 | Network exfiltration | Hard-coded host allowlist (Apple's App Store Server API hosts, the iTunes Lookup API for icons, and Galva's Sparkle update host). Anything else fails closed in-process. |
 | Audit log leak | Sensitive parameters are redacted at write time; the log lives locally and never transmits. |

@@ -83,11 +83,7 @@ let peelApp = Target.target(
     infoPlist: .file(path: "Resources/Info.plist"),
     sources: ["Sources/PeelApp/**"],
     resources: ["Sources/PeelApp/Resources/**"],
-    // Tuist generates an Xcode project for local development; ad-hoc
-    // signing there can't resolve $(AppIdentifierPrefix), so we point at
-    // the dev entitlements file (no keychain-access-groups). The release
-    // workflow signs with Developer ID and uses Resources/Peel.entitlements.
-    entitlements: .file(path: "Resources/Peel-dev.entitlements"),
+    entitlements: .file(path: "Resources/Peel.entitlements"),
     dependencies: [
         .target(name: "PeelCore"),
         .target(name: "PeelAPI"),

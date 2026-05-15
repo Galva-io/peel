@@ -20,17 +20,16 @@
          disable-library-validation or allow-unsigned-executable-memory
          entitlements. -->
 
-    <!-- Opt the sandboxed app into the Data Protection keychain. The single
-         entry here exists not to share items with other apps — Peel ships
-         alone — but because macOS requires `keychain-access-groups` to be
-         declared before `kSecUseDataProtectionKeychain = true` queries are
-         accepted. With this in place, KeychainStore stops touching the
-         user's login keychain entirely; items live in the iOS-style
-         data-protection keychain, bound to the app's signed identity, and
-         macOS never prompts the user for access. -->
-    <key>keychain-access-groups</key>
-    <array>
-        <string>$(AppIdentifierPrefix)io.galva.peel</string>
-    </array>
+    <!-- We deliberately do NOT request `keychain-access-groups` even though
+         the data-protection keychain would give us iOS-style no-prompt
+         behavior. That entitlement is on the AMFI "managed" list, so AMFI
+         rejects the binary at launch ("No matching profile found") unless
+         a Developer ID provisioning profile is embedded in the bundle —
+         not just notarization. For a signed Developer ID app accessing
+         items it created itself, the login keychain doesn't prompt in
+         practice, so the simpler config wins. If we ever need true
+         no-prompt behavior we'll add the profile via developer.apple.com
+         and embed it in CI; `KeychainStore`'s runtime probe is already in
+         place to opt into the data-protection keychain when available. -->
 </dict>
 </plist>

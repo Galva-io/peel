@@ -109,49 +109,16 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm /tmp/certificate.p12
 
-      - name: Prepare signed entitlements
-        if: steps.signing.outputs.available == 'true'
-        env:
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # `$(AppIdentifierPrefix)` is an Xcode build variable, not a
-          # codesign variable. Because the release pipeline calls
-          # `codesign --entitlements …` directly, the placeholder would
-          # ship inside the signed binary verbatim and the kernel would
-          # refuse to launch the app ("Peel can't be opened"). Substitute
-          # it with the actual Team ID before signing.
-          mkdir -p build
-          ENT="build/Peel.signed.entitlements"
-          cp Resources/Peel.entitlements "$ENT"
-          /usr/libexec/PlistBuddy \
-              -c "Set :keychain-access-groups:0 ${TEAM_ID}.io.galva.peel" \
-              "$ENT"
-          echo "--- entitlements after substitution ---"
-          /usr/libexec/PlistBuddy -c "Print" "$ENT"
-          echo "ENTITLEMENTS=$ENT" >> "$GITHUB_ENV"
-
       - name: Codesign with Developer ID
         if: steps.signing.outputs.available == 'true'
         run: |
           codesign --force --deep --options runtime --timestamp \
               --sign "Developer ID Application" \
-              --entitlements "$ENTITLEMENTS" \
+              --entitlements Resources/Peel.entitlements \
               build/Peel.app
           codesign --verify --strict --deep --verbose=2 build/Peel.app
-
-          # Print the embedded entitlements so a regression in
-          # placeholder substitution is visible in the workflow log.
-          # If `$(AppIdentifierPrefix)` ever shows up here, the next
-          # release will fail to launch.
           echo "--- embedded entitlements ---"
           codesign -d --entitlements - build/Peel.app
-
-          # Confirm the substituted access-group string is now a literal
-          # `<TeamID>.io.galva.peel`, not a placeholder.
-          if codesign -d --entitlements - build/Peel.app 2>&1 | grep -q 'AppIdentifierPrefix'; then
-              echo "::error::Entitlement still contains an unresolved \$(AppIdentifierPrefix) placeholder."
-              exit 1
-          fi
 
       - name: Build DMG
         run: |

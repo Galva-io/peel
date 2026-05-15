@@ -62,19 +62,18 @@ SwiftData for structured records (apps, history index, audit log). Plain files f
 
 ## Secrets
 
-The `.p8` private key for each app sits in the macOS **Data Protection keychain** only, keyed by the `AppConfig.id` UUID:
+The `.p8` private key for each app sits in the macOS Keychain only, keyed by the `AppConfig.id` UUID:
 
 ```
-service:    io.galva.peel
-account:    <uuid>.p8
-data:       <PEM contents>
-attrs:      kSecUseDataProtectionKeychain = true
-            AccessibleAfterFirstUnlockThisDeviceOnly
-            Synchronizable = false
-access-group: $(AppIdentifierPrefix)io.galva.peel
+service: io.galva.peel
+account: <uuid>.p8
+data:    <PEM contents>
+attrs:   AccessibleAfterFirstUnlockThisDeviceOnly · Synchronizable = false
 ```
 
-The Data Protection keychain is the iOS-style backend that ships on macOS 10.15+. The `keychain-access-groups` entitlement opts our sandboxed app into it — items are bound to Peel's signed identity (Team ID + bundle id) rather than to the user's login keychain, so macOS reads and writes silently with no password prompts. The side effect is that switching signing identities (ad-hoc dev build ↔ Developer-ID-signed release) makes prior items invisible; for a shipped, stably signed release that's exactly the scope we want.
+The user's login keychain is the backend. The sandboxed signed app gets default access to its own items without prompts; the system only ever surfaces an Allow dialog if a user manually opens Keychain Access and a different app tries to read those items.
+
+`KeychainStore` carries a one-time runtime probe for the iOS-style Data Protection keychain (`kSecUseDataProtectionKeychain`). It's dormant in shipped builds because we don't ship a Developer ID provisioning profile — `keychain-access-groups` is on AMFI's "managed entitlement" list, and a profile would be required for AMFI to accept the binary. If we ever add the profile, the probe activates automatically and items migrate to the data-protection backend with no further code change.
 
 The Storage layer never sees the key. Only `PeelAPI.Client` reads it, on the JWT-signing path.
 
